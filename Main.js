@@ -36,6 +36,9 @@ function onOpen() {
     .addItem('Rebuild Inventory Sheet', 'rebuildInventory')
     .addSeparator()
     .addItem('Find data Discrepancies', 'findDiscrepancies')
+    .addSeparator()
+    .addItem('Sync form choices', 'syncFormChoices')
+    .addItem('Apply form validation', 'applyFormValidation')
     .addToUi();
 }
 
