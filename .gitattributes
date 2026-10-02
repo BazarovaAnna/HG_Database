@@ -1,0 +1,3 @@
+# clasp выгружает файлы с LF, и clasp push отправляет их как есть.
+# Без этого core.autocrlf на Windows превращает их в CRLF при checkout.
+* text=auto eol=lf
