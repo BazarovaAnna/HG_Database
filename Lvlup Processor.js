@@ -371,10 +371,23 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
   }
 
   // --- 3. HP ---
+  // The form asks for the bare die roll. CON modifier (current, from
+  // Database) and +1 for a favored class bonus taken in HP are added
+  // here, the way Database counts min/max HP.
   var hpRolled = Number(getField(lvlRow, L, 'hpRolled')) || 0;
   if (hpRolled > 0) {
+    var charName = String(getField(lvlRow, L, 'charName') || '').trim();
+    var conMod = getDatabaseValue(charName, 'con_mod');
+    var fcHP = String(getField(lvlRow, L, 'fcBonus') || '').trim().toLowerCase() === 'hp' ? 1 : 0;
+    var gained = hpRolled + (Number(conMod) || 0) + fcHP;
+
     var oldHP = Number(regSheet.getRange(regRow, R.hpTotal).getValue()) || 0;
-    changes.push(setCell(regSheet, regRow, R.hpTotal, oldHP + hpRolled, 'hpTotal'));
+    changes.push(setCell(regSheet, regRow, R.hpTotal, oldHP + gained, 'hpTotal'));
+    // regCol 0: a note for the log, nothing to revert on undo
+    changes.push({ field: 'hpGained', regCol: 0, old: '',
+      new: 'roll ' + hpRolled +
+           ' + CON ' + (conMod === null ? '? (not in Database, counted as 0)' : conMod) +
+           ' + FC ' + fcHP + ' = ' + gained });
   }
 
   // --- 4. Favored class bonus ---
@@ -654,6 +667,25 @@ function processRetraining(sheet, row, retrainStr, R) {
 // ============================================================
 // LOOKUP HELPERS
 // ============================================================
+
+// Value of a Database field (row 4 key) for a character, or null if the
+// character or the key is not there.
+function getDatabaseValue(charName, key) {
+  var data = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Database').getDataRange().getValues();
+  var keys = data[3].map(function(h) { return String(h).trim(); });
+  var charCol = keys.indexOf('char');
+  var col = keys.indexOf(key);
+  if (charCol === -1 || col === -1) return null;
+
+  var target = String(charName).trim().toLowerCase();
+  for (var r = 4; r < data.length; r++) {
+    if (String(data[r][charCol]).trim().toLowerCase() === target) {
+      var v = data[r][col];
+      return (v === '' || v === null || v === undefined) ? null : v;
+    }
+  }
+  return null;
+}
 
 function findCharacterRow(regData, charName, R) {
   var target = charName.toLowerCase().trim();
