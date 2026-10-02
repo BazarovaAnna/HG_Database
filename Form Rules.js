@@ -147,15 +147,16 @@ function applyFormValidation() {
   for (var key in FORM_RULES) {
     var form = openLinkedForm(ss, key, report);
     if (!form) continue;
+    var items = indexFormItems(form);
 
     var rules = FORM_RULES[key];
     for (var r = 0; r < rules.length; r++) {
       for (var t = 0; t < rules[r].titles.length; t++) {
         var title = rules[r].titles[t];
         if (rules[r].whole) {
-          setWholeNumber(form, key, title, report);
+          setWholeNumber(items, key, title, report);
         } else {
-          setPattern(form, key, title, RX[rules[r].rx], HELP[rules[r].rx], report);
+          setPattern(items, key, title, RX[rules[r].rx], HELP[rules[r].rx], report);
         }
       }
     }
@@ -180,26 +181,28 @@ function syncFormChoices() {
 
   var reg = openLinkedForm(ss, 'registration', report);
   if (reg) {
-    setChoices(reg, 'registration', 'Race', races, report);
-    setChoices(reg, 'registration', 'Class name', classes, report);
-    setChoices(reg, 'registration', 'Second class name', classes, report);
-    setChoices(reg, 'registration', 'Third class name', classes, report);
-    setChoices(reg, 'registration', 'Deity', deities, report);
-    setPattern(reg, 'registration', 'Favored class', favClassRx, HELP.favClass, report);
+    var regItems = indexFormItems(reg);
+    setChoices(regItems, 'registration', 'Race', races, report);
+    setChoices(regItems, 'registration', 'Class name', classes, report);
+    setChoices(regItems, 'registration', 'Second class name', classes, report);
+    setChoices(regItems, 'registration', 'Third class name', classes, report);
+    setChoices(regItems, 'registration', 'Deity', deities, report);
+    setPattern(regItems, 'registration', 'Favored class', favClassRx, HELP.favClass, report);
   }
 
   var lvl = openLinkedForm(ss, 'lvlup', report);
   if (lvl) {
-    setChoices(lvl, 'lvlup', 'Character name', chars, report);
-    setChoices(lvl, 'lvlup', 'Class to level up', classes, report);
-    setPattern(lvl, 'lvlup', 'New Favorite Class', favClassRx, HELP.favClass, report);
+    var lvlItems = indexFormItems(lvl);
+    setChoices(lvlItems, 'lvlup', 'Character name', chars, report);
+    setChoices(lvlItems, 'lvlup', 'Class to level up', classes, report);
+    setPattern(lvlItems, 'lvlup', 'New Favorite Class', favClassRx, HELP.favClass, report);
   }
 
   var inv = openLinkedForm(ss, 'inventory', report);
-  if (inv) setChoices(inv, 'inventory', 'Character name', chars, report);
+  if (inv) setChoices(indexFormItems(inv), 'inventory', 'Character name', chars, report);
 
   var games = openLinkedForm(ss, 'games', report);
-  if (games) setChoices(games, 'games', 'Characters', chars, report);
+  if (games) setChoices(indexFormItems(games), 'games', 'Characters', chars, report);
 
   showFormReport('Form choices synced', report);
 }
@@ -222,30 +225,38 @@ function openLinkedForm(ss, key, report) {
   return FormApp.openByUrl(url);
 }
 
+// Reads the form's questions once: { title: { item, type } }.
+// Every getItems / getType / getTitle is a separate call to the Forms
+// service, so looking a question up by scanning the form each time
+// costs thousands of calls per run and takes minutes.
+//
 // Section headers can share a title with the question under them
 // ("Race", "Traits"), so non-question items are skipped.
 // The list is built here, not globally: global code also runs in
 // onOpen, a simple trigger that is not allowed to touch FormApp.
-function findFormItem(form, title) {
+function indexFormItems(form) {
   var nonQuestion = [
     FormApp.ItemType.PAGE_BREAK,
     FormApp.ItemType.SECTION_HEADER,
     FormApp.ItemType.IMAGE,
     FormApp.ItemType.VIDEO,
   ];
+  var index = {};
   var items = form.getItems();
   for (var i = 0; i < items.length; i++) {
-    if (nonQuestion.indexOf(items[i].getType()) !== -1) continue;
-    if (String(items[i].getTitle()).trim() === title) return items[i];
+    var type = items[i].getType();
+    if (nonQuestion.indexOf(type) !== -1) continue;
+    var title = String(items[i].getTitle()).trim();
+    if (!(title in index)) index[title] = { item: items[i], type: type };
   }
-  return null;
+  return index;
 }
 
-function setPattern(form, key, title, pattern, help, report) {
-  var item = findFormItem(form, title);
-  if (!item) { report.missing.push(key + ': "' + title + '"'); return; }
+function setPattern(items, key, title, pattern, help, report) {
+  var entry = items[title];
+  if (!entry) { report.missing.push(key + ': "' + title + '"'); return; }
 
-  var type = item.getType();
+  var item = entry.item, type = entry.type;
   if (type === FormApp.ItemType.TEXT) {
     item.asTextItem().setValidation(FormApp.createTextValidation()
       .setHelpText(help).requireTextMatchesPattern(pattern).build());
@@ -259,27 +270,27 @@ function setPattern(form, key, title, pattern, help, report) {
   report.done.push(key + ': "' + title + '"');
 }
 
-function setWholeNumber(form, key, title, report) {
-  var item = findFormItem(form, title);
-  if (!item) { report.missing.push(key + ': "' + title + '"'); return; }
-  if (item.getType() !== FormApp.ItemType.TEXT) {
-    report.wrongType.push(key + ': "' + title + '" is ' + item.getType() + ', expected short text');
+function setWholeNumber(items, key, title, report) {
+  var entry = items[title];
+  if (!entry) { report.missing.push(key + ': "' + title + '"'); return; }
+  if (entry.type !== FormApp.ItemType.TEXT) {
+    report.wrongType.push(key + ': "' + title + '" is ' + entry.type + ', expected short text');
     return;
   }
-  item.asTextItem().setValidation(FormApp.createTextValidation()
+  entry.item.asTextItem().setValidation(FormApp.createTextValidation()
     .setHelpText(HELP.whole).requireWholeNumber().build());
   report.done.push(key + ': "' + title + '"');
 }
 
-function setChoices(form, key, title, values, report) {
-  var item = findFormItem(form, title);
-  if (!item) { report.missing.push(key + ': "' + title + '"'); return; }
+function setChoices(items, key, title, values, report) {
+  var entry = items[title];
+  if (!entry) { report.missing.push(key + ': "' + title + '"'); return; }
   if (values.length === 0) {
     report.errors.push(key + ': "' + title + '" — source list is empty, left unchanged');
     return;
   }
 
-  var type = item.getType();
+  var item = entry.item, type = entry.type;
   if (type === FormApp.ItemType.LIST) {
     item.asListItem().setChoiceValues(values);
   } else if (type === FormApp.ItemType.CHECKBOX) {
