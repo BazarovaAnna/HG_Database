@@ -194,7 +194,8 @@ function findDiscrepancies() {
     // ========================================
     // CHECK 4: Favored class is one of the character's classes
     // ========================================
-    var favClasses = favClass.split('/').map(function(f) { return f.trim().toLowerCase(); });
+    // "Fighter/Rogue" (typed) or "Fighter, Rogue" (form checkboxes)
+    var favClasses = favClass.split(/[\/,]/).map(function(f) { return f.trim().toLowerCase(); });
     var classNamesLower = classes.map(function(c) { return c.name.toLowerCase(); });
     for (var fi = 0; fi < favClasses.length; fi++) {
       if (classNamesLower.indexOf(favClasses[fi]) === -1) {
@@ -222,7 +223,7 @@ function findDiscrepancies() {
     if (favClass) {
       var favClassLvl = 0;
       // Handle multiple favored classes (Half-Elf)
-      var favClasses = favClass.split('/').map(function(f) { return f.trim().toLowerCase(); });
+      var favClasses = favClass.split(/[\/,]/).map(function(f) { return f.trim().toLowerCase(); });
       var favClassLvl = 0;
       for (var ci = 0; ci < classes.length; ci++) {
         if (favClasses.indexOf(classes[ci].name.toLowerCase()) !== -1) {

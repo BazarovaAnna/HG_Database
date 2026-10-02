@@ -187,7 +187,7 @@ function syncFormChoices() {
     setChoices(regItems, 'registration', 'Second class name', classes, report);
     setChoices(regItems, 'registration', 'Third class name', classes, report);
     setChoices(regItems, 'registration', 'Deity', deities, report);
-    setPattern(regItems, 'registration', 'Favored class', favClassRx, HELP.favClass, report);
+    setFavoredClass(regItems, 'registration', 'Favored class', classes, favClassRx, report);
   }
 
   var lvl = openLinkedForm(ss, 'lvlup', report);
@@ -195,7 +195,7 @@ function syncFormChoices() {
     var lvlItems = indexFormItems(lvl);
     setChoices(lvlItems, 'lvlup', 'Character name', chars, report);
     setChoices(lvlItems, 'lvlup', 'Class to level up', classes, report);
-    setPattern(lvlItems, 'lvlup', 'New Favorite Class', favClassRx, HELP.favClass, report);
+    setFavoredClass(lvlItems, 'lvlup', 'New Favorite Class', classes, favClassRx, report);
   }
 
   var inv = openLinkedForm(ss, 'inventory', report);
@@ -280,6 +280,17 @@ function setWholeNumber(items, key, title, report) {
   entry.item.asTextItem().setValidation(FormApp.createTextValidation()
     .setHelpText(HELP.whole).requireWholeNumber().build());
   report.done.push(key + ': "' + title + '"');
+}
+
+// Favored class works either way: as checkboxes (answer "Fighter, Rogue")
+// it gets the class list; as text it gets a pattern built from that list.
+function setFavoredClass(items, key, title, classes, pattern, report) {
+  var entry = items[title];
+  if (entry && entry.type === FormApp.ItemType.CHECKBOX) {
+    setChoices(items, key, title, classes, report);
+  } else {
+    setPattern(items, key, title, pattern, HELP.favClass, report);
+  }
 }
 
 function setChoices(items, key, title, values, report) {
