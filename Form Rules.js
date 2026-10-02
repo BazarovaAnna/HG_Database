@@ -222,9 +222,20 @@ function openLinkedForm(ss, key, report) {
   return FormApp.openByUrl(url);
 }
 
+// Section headers can share a title with the question under them
+// ("Race", "Traits"), so non-question items are skipped.
+// The list is built here, not globally: global code also runs in
+// onOpen, a simple trigger that is not allowed to touch FormApp.
 function findFormItem(form, title) {
+  var nonQuestion = [
+    FormApp.ItemType.PAGE_BREAK,
+    FormApp.ItemType.SECTION_HEADER,
+    FormApp.ItemType.IMAGE,
+    FormApp.ItemType.VIDEO,
+  ];
   var items = form.getItems();
   for (var i = 0; i < items.length; i++) {
+    if (nonQuestion.indexOf(items[i].getType()) !== -1) continue;
     if (String(items[i].getTitle()).trim() === title) return items[i];
   }
   return null;
