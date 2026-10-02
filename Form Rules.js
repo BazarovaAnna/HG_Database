@@ -44,7 +44,7 @@ var RX_AMOUNT = '[+-]?\\d+(?:\\.\\d+)?';
 var RX = {
   // Names are keys and appear in "Name: …; Name: …" and comma lists
   charName: '^[^,;:]+$',
-  vkLink:   '^(?:https?://)?(?:m\\.)?vk\\.com/[A-Za-z0-9_.]+/?$',
+  vkLink:   '^(?:https?://)?(?:www\\.|m\\.)?vk\\.(?:com|ru)/[A-Za-z0-9_.]+/?$',
   ability:  '^(?:[3-9]|1[0-9]|20)$',
   level:    '^(?:[2-9]|1[0-9]|20)$',
   // "known/prepared", "-" means unlimited
@@ -72,7 +72,7 @@ var RX = {
 
 var HELP = {
   charName:  'Без запятых, точек с запятой и двоеточий',
-  vkLink:    'Ссылка вида vk.com/имя или https://vk.com/имя',
+  vkLink:    'Ссылка на страницу ВК: vk.com/имя, vk.ru/имя или https://vk.com/id12345',
   ability:   'Целое число от 3 до 20',
   level:     'Целое число от 2 до 20',
   whole:     'Целое число',
