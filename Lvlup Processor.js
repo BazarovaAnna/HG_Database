@@ -393,6 +393,8 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
   }
 
   // --- 5. Ability score increase ---
+  // Only the choice is recorded. The raw score stays the base value:
+  // Database adds the increases itself by counting abilityInc columns.
   var abilityInc = String(getField(lvlRow, L, 'abilityInc') || '').trim();
   if (abilityInc && abilityInc.toLowerCase() !== 'none') {
     var lvlNum = Number(newLevel) || 0;
@@ -403,15 +405,10 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
     var incKey = incKeyMap[lvlNum];
     if (incKey && R[incKey]) {
       changes.push(setCell(regSheet, regRow, R[incKey], abilityInc, incKey));
-    }
-
-    // Increment raw ability score
-    var abilityKeyMap = { 'str': 'str', 'dex': 'dex', 'con': 'con',
-                          'int': 'int', 'wis': 'wis', 'cha': 'cha' };
-    var abKey = abilityKeyMap[abilityInc.toLowerCase()];
-    if (abKey && R[abKey]) {
-      var oldScore = Number(regSheet.getRange(regRow, R[abKey]).getValue()) || 0;
-      changes.push(setCell(regSheet, regRow, R[abKey], oldScore + 1, abKey + '_score'));
+    } else {
+      // regCol 0: nothing to revert on undo
+      changes.push({ field: 'abilityInc', regCol: 0, old: '',
+                     new: 'IGNORED — ' + abilityInc + ' at level ' + lvlNum + ' (not 4/8/12/16/20)' });
     }
   }
 
