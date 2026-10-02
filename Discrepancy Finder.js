@@ -575,6 +575,18 @@ function findDiscrepancies() {
   } // end character loop
 
 
+  // ========================================
+  // CHECK 17: Inventory from Transactions
+  // ========================================
+  var knownChars = {};
+  for (var i = 4; i < data.length; i++) {
+    var name = String(v(data[i], 'char')).trim();
+    if (name) knownChars[name.toLowerCase()] = true;
+  }
+  var inventoryIssues = checkInventory(ss.getSheetByName('Transactions'), knownChars);
+  for (var ii = 0; ii < inventoryIssues.length; ii++) issues.push(inventoryIssues[ii]);
+
+
   // --- Write results ---
   writeDiscrepancySheet(ss, issues);
 
@@ -593,6 +605,68 @@ function findDiscrepancies() {
     'Total: ' + total + ' issues\n\n' +
     'See the "Discrepancies" sheet for details.'
   );
+}
+
+
+// ============================================================
+// INVENTORY CHECK
+// ============================================================
+// Folds Transactions by character + item, the same way the Inventory
+// sheet is built, and reports what the Inventory sheet hides:
+// items below zero (taken away under a different name than received),
+// negative gold, and transactions for characters missing from Database.
+
+function checkInventory(txnSheet, knownChars) {
+  var rows = [];
+  if (!txnSheet || txnSheet.getLastRow() <= 1) return rows;
+
+  var data = txnSheet.getRange(2, 1, txnSheet.getLastRow() - 1, 8).getValues();
+  var items = {};
+  var order = [];
+  var unknownChars = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var charName = String(data[i][TXN.character - 1]).trim();
+    var itemName = String(data[i][TXN.itemName - 1]).trim();
+    if (!charName || !itemName) continue;
+
+    if (!knownChars[charName.toLowerCase()]) {
+      unknownChars[charName] = (unknownChars[charName] || 0) + 1;
+    }
+
+    var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
+    if (!(key in items)) {
+      items[key] = { character: charName, itemName: itemName, quantity: 0 };
+      order.push(key);
+    }
+    items[key].quantity += Number(data[i][TXN.quantity - 1]) || 0;
+  }
+
+  for (var k = 0; k < order.length; k++) {
+    var item = items[order[k]];
+    // Float sums of gold like 42.37 can end at -1e-14
+    var qty = Math.round(item.quantity * 100) / 100;
+    if (qty >= 0) continue;
+
+    if (item.itemName.toLowerCase() === 'gold') {
+      rows.push([item.character, '⚠️ WARNING', 'Inventory',
+        'Negative gold — spent more than received',
+        '≥ 0', qty]);
+    } else {
+      rows.push([item.character, '❌ ERROR', 'Inventory',
+        '"' + item.itemName + '" below zero — removed more than received. ' +
+        'Usually the name differs from the one it was received under',
+        '≥ 0', qty]);
+    }
+  }
+
+  for (var name in unknownChars) {
+    rows.push([name, '❌ ERROR', 'Inventory',
+      'Transactions for a character not in Database — typo in a form, or registration not approved',
+      'Character from Database', unknownChars[name] + ' transaction(s)']);
+  }
+
+  return rows;
 }
 
 
