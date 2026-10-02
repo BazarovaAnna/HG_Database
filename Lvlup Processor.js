@@ -371,23 +371,41 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
   }
 
   // --- 3. HP ---
-  // The form asks for the bare die roll. CON modifier (current, from
-  // Database) and +1 for a favored class bonus taken in HP are added
-  // here, the way Database counts min/max HP.
+  // The form asks for the bare die roll. Added here, the way Database
+  // counts min/max HP:
+  //   + CON modifier (from Database; the new one if CON rises on this level)
+  //   + 1 for a favored class bonus taken in HP
+  //   + retroactive HP: in PF1e a higher CON modifier counts for every
+  //     previous level too, so +1 per previous level when it goes up.
   var hpRolled = Number(getField(lvlRow, L, 'hpRolled')) || 0;
   if (hpRolled > 0) {
     var charName = String(getField(lvlRow, L, 'charName') || '').trim();
-    var conMod = getDatabaseValue(charName, 'con_mod');
+    var db = getDatabaseRow(charName);
     var fcHP = String(getField(lvlRow, L, 'fcBonus') || '').trim().toLowerCase() === 'hp' ? 1 : 0;
-    var gained = hpRolled + (Number(conMod) || 0) + fcHP;
+
+    var conMod = db ? (Number(db.con_mod) || 0) : 0;
+    var retro = 0;
+    var lvlNum = Number(getField(lvlRow, L, 'newLevel')) || 0;
+    var incCon = String(getField(lvlRow, L, 'abilityInc') || '').trim().toUpperCase() === 'CON' &&
+                 [4, 8, 12, 16, 20].indexOf(lvlNum) !== -1;
+    if (db && incCon) {
+      var conScore = (Number(db.con_score) || 0) + (Number(db.con_add) || 0) +
+                     (Number(db.con_racial_var) || 0) + (Number(db.con_ability_increase) || 0);
+      var newConMod = Math.floor((conScore + 1 - 10) / 2);
+      retro = (newConMod - conMod) * Math.max(lvlNum - 1, 0);
+      conMod = newConMod;
+    }
+    var gained = hpRolled + conMod + fcHP + retro;
 
     var oldHP = Number(regSheet.getRange(regRow, R.hpTotal).getValue()) || 0;
     changes.push(setCell(regSheet, regRow, R.hpTotal, oldHP + gained, 'hpTotal'));
     // regCol 0: a note for the log, nothing to revert on undo
     changes.push({ field: 'hpGained', regCol: 0, old: '',
       new: 'roll ' + hpRolled +
-           ' + CON ' + (conMod === null ? '? (not in Database, counted as 0)' : conMod) +
-           ' + FC ' + fcHP + ' = ' + gained });
+           ' + CON ' + (db ? conMod : '? (not in Database, counted as 0)') +
+           ' + FC ' + fcHP +
+           (retro ? ' + retro CON +' + (retro / Math.max(lvlNum - 1, 1)) + ' × ' + (lvlNum - 1) : '') +
+           ' = ' + gained });
   }
 
   // --- 4. Favored class bonus ---
@@ -668,20 +686,22 @@ function processRetraining(sheet, row, retrainStr, R) {
 // LOOKUP HELPERS
 // ============================================================
 
-// Value of a Database field (row 4 key) for a character, or null if the
-// character or the key is not there.
-function getDatabaseValue(charName, key) {
+// A character's Database row as { key: value } by the row-4 keys,
+// or null if the character is not there.
+function getDatabaseRow(charName) {
   var data = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Database').getDataRange().getValues();
   var keys = data[3].map(function(h) { return String(h).trim(); });
   var charCol = keys.indexOf('char');
-  var col = keys.indexOf(key);
-  if (charCol === -1 || col === -1) return null;
+  if (charCol === -1) return null;
 
   var target = String(charName).trim().toLowerCase();
   for (var r = 4; r < data.length; r++) {
     if (String(data[r][charCol]).trim().toLowerCase() === target) {
-      var v = data[r][col];
-      return (v === '' || v === null || v === undefined) ? null : v;
+      var row = {};
+      for (var c = 0; c < keys.length; c++) {
+        if (keys[c] && !(keys[c] in row)) row[keys[c]] = data[r][c];
+      }
+      return row;
     }
   }
   return null;
