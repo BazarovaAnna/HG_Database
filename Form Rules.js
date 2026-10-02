@@ -175,6 +175,7 @@ function syncFormChoices() {
   var races   = readRefColumn(ref, 'Race');
   var deities = readRefColumn(ref, 'Deity');
   var chars   = readCharacterNames(ss);
+  var masters = readMasters(ss, report);
 
   var favClassRx = '^\\s*(?:' + classes.map(escapeRegex).join('|') + ')' +
                    '(?:\\s*/\\s*(?:' + classes.map(escapeRegex).join('|') + '))*\\s*$';
@@ -202,7 +203,11 @@ function syncFormChoices() {
   if (inv) setChoices(indexFormItems(inv), 'inventory', 'Character name', chars, report);
 
   var games = openLinkedForm(ss, 'games', report);
-  if (games) setChoices(indexFormItems(games), 'games', 'Characters', chars, report);
+  if (games) {
+    var gameItems = indexFormItems(games);
+    setChoices(gameItems, 'games', 'Characters', chars, report);
+    setChoices(gameItems, 'games', 'Master', masters, report);
+  }
 
   showFormReport('Form choices synced', report);
 }
@@ -335,6 +340,23 @@ function readRefColumn(ref, header) {
     values.push(v);
   }
   return values;
+}
+
+// Masters is filled by hand: header row "vks | master", one GM per row.
+function readMasters(ss, report) {
+  var sheet = ss.getSheetByName('Masters');
+  if (!sheet) { report.errors.push('Sheet "Masters" not found'); return []; }
+
+  var data = sheet.getDataRange().getValues();
+  var col = data[0].map(function(h) { return String(h).trim().toLowerCase(); }).indexOf('master');
+  if (col === -1) { report.errors.push('Column "master" not found in Masters row 1'); return []; }
+
+  var names = [];
+  for (var r = 1; r < data.length; r++) {
+    var v = String(data[r][col]).trim();
+    if (v && names.indexOf(v) === -1) names.push(v);
+  }
+  return names;
 }
 
 function readCharacterNames(ss) {
