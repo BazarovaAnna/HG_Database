@@ -745,27 +745,3 @@ function buildInventorySheet(ss, txnSheet) {
 function isApproved(val) {
   return val === true || val === 'TRUE' || val === 'True';
 }
-
-
-// ============================================================
-// UPDATED onOpen
-// ============================================================
-
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('PF1e Tools')
-    .addItem('Refresh ALL normalized tables', 'parseAll')
-    .addSeparator()
-    .addItem('Refresh Feats only', 'parseFeats')
-    .addItem('Refresh Skills only', 'parseSkills')
-    .addItem('Refresh Spells only', 'parseSpells')
-    .addSeparator()
-    .addItem('Process Level-Ups', 'processLevelUps')
-    .addSeparator()
-    .addItem('Process Game Sessions', 'processGameSessions')
-    .addItem('Process Inventory', 'processInventory')
-    .addItem('Rebuild Inventory Sheet', 'rebuildInventory')
-    .addSeparator()
-    .addItem('Find data Discrepancies', 'findDiscrepancies')
-    .addToUi();
-}
