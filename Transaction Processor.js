@@ -713,36 +713,45 @@ function writeTxnRows(txnSheet, txns) {
 // INVENTORY SHEET BUILDER
 // ============================================================
 
+// Columns of the Inventory sheet that come from Items catalog but may be
+// overridden by hand. Order = order in the sheet, after "notes".
+var INVENTORY_CATALOG_COLS = ['link', 'category'];
+
 // Manual columns of the Inventory sheet, kept across rebuilds by
-// character + item: { key: { notes, link } }.
-// A link counts as manual unless it equals its cell note: links filled
-// from Items catalog carry the catalog URL as the note, so a link the
-// GM typed or changed differs from it and is kept, while an untouched
-// catalog link is refilled from the current catalog.
+// character + item: { key: { notes, link, category } }.
+// A catalog-backed value counts as manual unless it equals its cell note:
+// values filled from Items catalog carry that same value as the note, so
+// one the GM typed or changed differs from it and is kept, while an
+// untouched catalog value is refilled from the current catalog.
 function readInventoryManual(sheet) {
   var kept = {};
   if (sheet.getLastRow() <= 1) return kept;
 
-  var range = sheet.getDataRange();
-  var data = range.getValues();
+  var data = sheet.getDataRange().getValues();
   var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
-  var c = { ch: hdr.indexOf('character'), item: hdr.indexOf('item_name'),
-            notes: hdr.indexOf('notes'), link: hdr.indexOf('link') };
-  if (c.ch === -1 || c.item === -1) return kept;
+  var ch = hdr.indexOf('character'), item = hdr.indexOf('item_name'), notesCol = hdr.indexOf('notes');
+  if (ch === -1 || item === -1) return kept;
 
-  var cellNotes = c.link === -1 ? [] :
-    sheet.getRange(1, c.link + 1, data.length, 1).getNotes();
+  var cols = {}, cellNotes = {};
+  INVENTORY_CATALOG_COLS.forEach(function(name) {
+    cols[name] = hdr.indexOf(name);
+    cellNotes[name] = cols[name] === -1 ? [] :
+      sheet.getRange(1, cols[name] + 1, data.length, 1).getNotes();
+  });
 
   for (var r = 1; r < data.length; r++) {
-    var ch = String(data[r][c.ch]).trim(), item = String(data[r][c.item]).trim();
-    if (!ch || !item) continue;
+    var c = String(data[r][ch]).trim(), it = String(data[r][item]).trim();
+    if (!c || !it) continue;
 
-    var notes = c.notes === -1 ? '' : String(data[r][c.notes] || '').trim();
-    var link = c.link === -1 ? '' : String(data[r][c.link] || '').trim();
-    var fromCatalog = String((cellNotes[r] || [''])[0] || '').trim();
-    if (link && link === fromCatalog) link = '';
-
-    if (notes || link) kept[ch.toLowerCase() + '|' + item.toLowerCase()] = { notes: notes, link: link };
+    var entry = { notes: notesCol === -1 ? '' : String(data[r][notesCol] || '').trim() };
+    var any = !!entry.notes;
+    INVENTORY_CATALOG_COLS.forEach(function(name) {
+      var v = cols[name] === -1 ? '' : String(data[r][cols[name]] || '').trim();
+      var fromCatalog = String((cellNotes[name][r] || [''])[0] || '').trim();
+      entry[name] = (v && v !== fromCatalog) ? v : '';
+      if (entry[name]) any = true;
+    });
+    if (any) kept[c.toLowerCase() + '|' + it.toLowerCase()] = entry;
   }
   return kept;
 }
@@ -789,9 +798,10 @@ function buildInventorySheet(ss, txnSheet) {
   }
 
   var rows = [];
+  var NOTES_COL = 8;
   rows.push(['character', 'item_name', 'source', 'cost', 'weight',
-             'quantity', 'total_value', 'notes', 'link']);
-  var LINK_COL = 9;
+             'quantity', 'total_value', 'notes'].concat(INVENTORY_CATALOG_COLS));
+  var LINK_COL = NOTES_COL + 1 + INVENTORY_CATALOG_COLS.indexOf('link');
 
   for (var i = 0; i < order.length; i++) {
     var item = items[order[i]];
@@ -804,15 +814,22 @@ function buildInventorySheet(ss, txnSheet) {
 
     var key = order[i];
     var manual = kept[key] || {};
-    var ref = catalog[item.itemName.toLowerCase()];
-    var catLink = ref ? ref.link : '';
-    var link = manual.link || catLink;
+    var ref = catalog[item.itemName.toLowerCase()] || {};
 
-    // Last element is a helper: the catalog URL the link was taken from,
-    // stored as the cell note (see readInventoryManual); cut before writing
+    // Catalog-backed columns: the manual value, else the catalog one.
+    // The last element is a helper holding the cell notes (the catalog
+    // value each cell was filled from, see readInventoryManual); it is
+    // cut off before writing.
+    var values = [], notes = [];
+    INVENTORY_CATALOG_COLS.forEach(function(name) {
+      var fromCatalog = String(ref[name] || '').trim();
+      values.push(manual[name] || fromCatalog);
+      notes.push(manual[name] ? '' : fromCatalog);
+    });
+
     rows.push([item.character, item.itemName, sourceLabel,
                item.cost, item.weight, item.quantity, totalValue,
-               manual.notes || '', link, manual.link ? '' : catLink]);
+               manual.notes || ''].concat(values, [notes]));
   }
 
   // Sort by character name (column 1), then item name (column 2)
@@ -824,13 +841,13 @@ function buildInventorySheet(ss, txnSheet) {
   });
   rows = [rows[0]].concat(dataRows);
   
-  var linkNotes = rows.slice(1).map(function(r) { return [r.pop()]; });
+  var cellNotes = rows.slice(1).map(function(r) { return r.pop(); });
 
   if (rows.length <= 1) {
     sheet.getRange(1, 1, 1, rows[0].length).setValues([rows[0]]);
   } else {
     sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
-    sheet.getRange(2, LINK_COL, linkNotes.length, 1).setNotes(linkNotes);
+    sheet.getRange(2, NOTES_COL + 1, cellNotes.length, INVENTORY_CATALOG_COLS.length).setNotes(cellNotes);
   }
 
   // Format header
@@ -842,7 +859,7 @@ function buildInventorySheet(ss, txnSheet) {
 
   // Highlight notes column
   if (rows.length > 1) {
-    sheet.getRange(2, 8, rows.length - 1, 2).setBackground('#FFF9E6');
+    sheet.getRange(2, NOTES_COL, rows.length - 1, 1 + INVENTORY_CATALOG_COLS.length).setBackground('#FFF9E6');
   }
 
   // Alternate row colors
