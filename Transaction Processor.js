@@ -853,6 +853,23 @@ function buildInventorySheet(ss, txnSheet) {
     sheet.getRange(1, 1, 1, rows[0].length).setValues([rows[0]]);
   } else {
     sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+
+    // Values filled from the catalog: grey italic; the GM's own: plain
+    var n = INVENTORY_CATALOG_COLS.length;
+    var styles = [], colors = [];
+    for (var r = 1; r < rows.length; r++) {
+      var st = [], co = [];
+      for (var k = 0; k < n; k++) {
+        var fromCatalog = rows[r][NOTES_COL + n + k] !== '';
+        st.push(fromCatalog ? 'italic' : 'normal');
+        co.push(fromCatalog ? '#808080' : '#000000');
+      }
+      styles.push(st);
+      colors.push(co);
+    }
+    var catalogRange = sheet.getRange(2, NOTES_COL + 1, rows.length - 1, n);
+    catalogRange.setFontStyles(styles);
+    catalogRange.setFontColors(colors);
   }
 
   // Format header
