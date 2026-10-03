@@ -356,6 +356,12 @@ function parseInventoryForm(row, I, inventory, charName, catalog) {
     var parsed = applyCatalog(parseItemFull(bought[i].trim()), catalog);
     if (!parsed) continue;
 
+    // An explicitly written 0 is a choice; an omitted price with no
+    // catalog entry is probably a mistake — record it, but say so
+    if (parsed.given < 2 && !(Number(parsed.cost) > 0)) {
+      warnings.push('"' + parsed.name + '" bought for 0: no price stated and not in catalog');
+    }
+
     var qty = Math.abs(parsed.quantity);
     add({
       timestamp: timestamp, source: 'inventory', character: charName,
