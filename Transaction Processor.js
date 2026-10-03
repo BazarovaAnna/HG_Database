@@ -92,6 +92,7 @@ function processGameSessions() {
   var txnSheet = getOrCreateTransactionsSheet(ss);
   var processedSet = getTxnProcessedSet(txnSheet);
   var gameData = gameSheet.getDataRange().getValues();
+  var catalog = loadItemCatalog(ss);
 
   var processed = 0;
   var skipped = 0;
@@ -109,7 +110,7 @@ function processGameSessions() {
     if (processedSet[processKey]) { skipped++; continue; }
 
     try {
-      var txns = parseGameForm(row, G);
+      var txns = parseGameForm(row, G, catalog);
       writeTxnRows(txnSheet, txns);
       processed++;
       processedSet[processKey] = true;
@@ -195,6 +196,7 @@ function processInventory() {
   var invData = invSheet.getDataRange().getValues();
 
   var inventory = buildInventoryMap(txnSheet);
+  var catalog = loadItemCatalog(ss);
 
   var processed = 0;
   var skipped = 0;
@@ -214,13 +216,12 @@ function processInventory() {
     if (processedSet[processKey]) { skipped++; continue; }
 
     try {
-      var result = parseInventoryForm(row, I, inventory, charName);
+      // parseInventoryForm updates the inventory map itself, txn by txn,
+      // so an item received earlier in the same answer can be sold in it
+      var result = parseInventoryForm(row, I, inventory, charName, catalog);
       writeTxnRows(txnSheet, result.txns);
       for (var w = 0; w < result.warnings.length; w++) {
         warnings.push(charName + ': ' + result.warnings[w]);
-      }
-      for (var t = 0; t < result.txns.length; t++) {
-        updateInventoryMap(inventory, result.txns[t]);
       }
       processed++;
       processedSet[processKey] = true;
@@ -258,7 +259,7 @@ function rebuildInventory() {
 // GAME FORM PARSER
 // ============================================================
 
-function parseGameForm(row, G) {
+function parseGameForm(row, G, catalog) {
   var txns = [];
   var timestamp = String(getField(row, G, 'timestamp'));
   var gameName = String(getField(row, G, 'gameName') || '').trim();
@@ -312,7 +313,7 @@ function parseGameForm(row, G) {
 
       var items = itemsStr.split(',');
       for (var it = 0; it < items.length; it++) {
-        var parsed = parseItemFull(items[it].trim());
+        var parsed = applyCatalog(parseItemFull(items[it].trim()), catalog);
         if (!parsed) continue;
         txns.push({
           timestamp: timestamp, source: 'game', character: charName,
@@ -332,114 +333,135 @@ function parseGameForm(row, G) {
 // INVENTORY FORM PARSER
 // ============================================================
 
-function parseInventoryForm(row, I, inventory, charName) {
+function parseInventoryForm(row, I, inventory, charName, catalog) {
   var txns = [];
   var warnings = [];
   var timestamp = String(getField(row, I, 'timestamp'));
   var comment = String(getField(row, I, 'comment') || '').trim();
 
-  // --- Items bought ---
-  var boughtStr = String(getField(row, I, 'itemsBought') || '').trim();
-  if (boughtStr) {
-    var boughtItems = boughtStr.split(',');
-    for (var i = 0; i < boughtItems.length; i++) {
-      var parsed = parseItemFull(boughtItems[i].trim());
-      if (!parsed) continue;
-
-      var qty = Math.abs(parsed.quantity);
-      txns.push({
-        timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: parsed.name, quantity: qty,
-        cost: parsed.cost, weight: parsed.weight,
-        notes: comment,
-      });
-
-      var totalCost = parsed.cost * qty;
-      if (totalCost > 0) {
-        txns.push({
-          timestamp: timestamp, source: 'inventory', character: charName,
-          itemName: 'gold', quantity: -totalCost, cost: 1, weight: '',
-          notes: 'Bought ' + (qty > 1 ? qty + ' ' : '') + parsed.name,
-        });
-      }
-    }
+  // Every txn goes through here so the inventory map stays current:
+  // an item got earlier in this answer can be sold later in it.
+  function add(txn) {
+    txns.push(txn);
+    updateInventoryMap(inventory, txn);
+  }
+  function list(field) {
+    var s = String(getField(row, I, field) || '').trim();
+    return s ? s.split(',') : [];
   }
 
-  // --- Items sold ---
-  var soldStr = String(getField(row, I, 'itemsSold') || '').trim();
-  if (soldStr) {
-    var soldItems = soldStr.split(',');
-    for (var i = 0; i < soldItems.length; i++) {
-      var parsed = parseItemSimple(soldItems[i].trim());
-      if (!parsed) continue;
+  // --- Items bought: cost and weight from the catalog if omitted ---
+  var bought = list('itemsBought');
+  for (var i = 0; i < bought.length; i++) {
+    var parsed = applyCatalog(parseItemFull(bought[i].trim()), catalog);
+    if (!parsed) continue;
 
-      var lookup = lookupItem(inventory, charName, parsed.name);
-      if (!lookup.found) {
-        warnings.push('"' + parsed.name + '" not found in inventory — cost set to N/A');
-      }
+    var qty = Math.abs(parsed.quantity);
+    add({
+      timestamp: timestamp, source: 'inventory', character: charName,
+      itemName: parsed.name, quantity: qty,
+      cost: parsed.cost, weight: parsed.weight,
+      notes: comment,
+    });
 
-      var qty = Math.abs(parsed.quantity);
-      txns.push({
+    var totalCost = roundGold(parsed.cost * qty);
+    if (totalCost > 0) {
+      add({
         timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: parsed.name, quantity: -qty,
-        cost: lookup.cost, weight: lookup.weight,
-        notes: comment,
-      });
-
-      if (lookup.found && Number(lookup.cost) > 0) {
-        var sellGold = Math.floor(Number(lookup.cost) * qty / 2);
-        txns.push({
-          timestamp: timestamp, source: 'inventory', character: charName,
-          itemName: 'gold', quantity: sellGold, cost: 1, weight: '',
-          notes: 'Sold ' + (qty > 1 ? qty + ' ' : '') + parsed.name,
-        });
-      }
-    }
-  }
-
-  // --- Items gifted ---
-  var giftedStr = String(getField(row, I, 'itemsGifted') || '').trim();
-  if (giftedStr) {
-    var giftedItems = giftedStr.split(',');
-    for (var i = 0; i < giftedItems.length; i++) {
-      var parsed = parseItemSimple(giftedItems[i].trim());
-      if (!parsed) continue;
-
-      var lookup = lookupItem(inventory, charName, parsed.name);
-      if (!lookup.found) {
-        warnings.push('"' + parsed.name + '" not found in inventory — cost set to N/A');
-      }
-
-      txns.push({
-        timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: parsed.name, quantity: -Math.abs(parsed.quantity),
-        cost: lookup.cost, weight: lookup.weight,
-        notes: comment,
+        itemName: 'gold', quantity: -totalCost, cost: 1, weight: '',
+        notes: 'Bought ' + (qty > 1 ? qty + ' ' : '') + parsed.name,
       });
     }
   }
 
-  // --- Items got ---
-  var gotStr = String(getField(row, I, 'itemsGot') || '').trim();
-  if (gotStr) {
-    var gotItems = gotStr.split(',');
-    for (var i = 0; i < gotItems.length; i++) {
-      var parsed = parseItemFull(gotItems[i].trim());
-      if (!parsed) continue;
+  // --- Items got: free, cost and weight from the catalog if omitted ---
+  var got = list('itemsGot');
+  for (var i = 0; i < got.length; i++) {
+    var parsed = applyCatalog(parseItemFull(got[i].trim()), catalog);
+    if (!parsed) continue;
 
-      txns.push({
+    add({
+      timestamp: timestamp, source: 'inventory', character: charName,
+      itemName: parsed.name, quantity: Math.abs(parsed.quantity),
+      cost: parsed.cost, weight: parsed.weight,
+      notes: comment,
+    });
+  }
+
+  // --- Items sold: only what the character has ---
+  // "name qty price": price is what the character got per item.
+  // Without a price: half the catalog price, else half the price it was
+  // bought for, else nothing (with a warning).
+  var sold = list('itemsSold');
+  for (var i = 0; i < sold.length; i++) {
+    var parsed = parseItemFull(sold[i].trim());
+    if (!parsed) continue;
+
+    var qty = Math.abs(parsed.quantity);
+    var lookup = lookupItem(inventory, charName, parsed.name);
+    if (!lookup.found || lookup.quantity < qty) {
+      warnings.push('"' + parsed.name + '" x' + qty + ' not sold: character has ' +
+                    (lookup.found ? lookup.quantity : 0));
+      continue;
+    }
+
+    add({
+      timestamp: timestamp, source: 'inventory', character: charName,
+      itemName: parsed.name, quantity: -qty,
+      cost: lookup.cost, weight: lookup.weight,
+      notes: comment,
+    });
+
+    var price = null, how = '';
+    var ref = catalog[parsed.name.toLowerCase()];
+    if (parsed.given >= 2) {
+      price = parsed.cost; how = 'stated price';
+    } else if (ref && Number(ref.cost) > 0) {
+      price = Number(ref.cost) / 2; how = 'half catalog price';
+    } else if (Number(lookup.cost) > 0) {
+      price = Number(lookup.cost) / 2; how = 'half purchase price';
+    }
+
+    if (price === null) {
+      warnings.push('"' + parsed.name + '" sold for 0: no price stated, none in catalog or inventory');
+      continue;
+    }
+    var sellGold = roundGold(price * qty);
+    if (sellGold > 0) {
+      add({
         timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: parsed.name, quantity: Math.abs(parsed.quantity),
-        cost: parsed.cost, weight: parsed.weight,
-        notes: comment,
+        itemName: 'gold', quantity: sellGold, cost: 1, weight: '',
+        notes: 'Sold ' + (qty > 1 ? qty + ' ' : '') + parsed.name + ' (' + how + ')',
       });
     }
+  }
+
+  // --- Items gifted: only what the character has ---
+  var gifted = list('itemsGifted');
+  for (var i = 0; i < gifted.length; i++) {
+    var parsed = parseItemSimple(gifted[i].trim());
+    if (!parsed) continue;
+
+    var qty = Math.abs(parsed.quantity);
+    var lookup = lookupItem(inventory, charName, parsed.name);
+    if (!lookup.found || lookup.quantity < qty) {
+      warnings.push('"' + parsed.name + '" x' + qty + ' not gifted: character has ' +
+                    (lookup.found ? lookup.quantity : 0));
+      continue;
+    }
+
+    add({
+      timestamp: timestamp, source: 'inventory', character: charName,
+      itemName: parsed.name, quantity: -qty,
+      cost: lookup.cost, weight: lookup.weight,
+      notes: comment,
+    });
   }
 
   // --- Gold changes ---
   var goldChange = Number(getField(row, I, 'goldDelta')) || 0;
   if (goldChange !== 0) {
-    txns.push({
+    add({
       timestamp: timestamp, source: 'inventory', character: charName,
       itemName: 'gold', quantity: goldChange, cost: 1, weight: '',
       notes: comment,
@@ -447,6 +469,58 @@ function parseInventoryForm(row, I, inventory, charName) {
   }
 
   return { txns: txns, warnings: warnings };
+}
+
+// Gold to the copper: 2.5 gp stays 2.5, float noise is cut off
+function roundGold(x) {
+  return Math.round(x * 100) / 100;
+}
+
+
+// ============================================================
+// ITEM CATALOG
+// ============================================================
+// Sheet "Items catalog" is filled by hand: item_name | category | description |
+// cost | weight | link. Items given by name in a form take cost and
+// weight from here unless the form states them; the Inventory sheet
+// takes the link from here unless one was entered by hand.
+
+function loadItemCatalog(ss) {
+  var catalog = {};
+  var sheet = ss.getSheetByName('Items catalog');
+  if (!sheet || sheet.getLastRow() <= 1) return catalog;
+
+  var data = sheet.getDataRange().getValues();
+  var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var c = {
+    name: hdr.indexOf('item_name'), category: hdr.indexOf('category'),
+    description: hdr.indexOf('description'), cost: hdr.indexOf('cost'),
+    weight: hdr.indexOf('weight'), link: hdr.indexOf('link'),
+  };
+  if (c.name === -1) return catalog;
+
+  for (var r = 1; r < data.length; r++) {
+    var name = String(data[r][c.name]).trim();
+    if (!name) continue;
+    var row = data[r];
+    var cell = function(k) { return c[k] === -1 ? '' : row[c[k]]; };
+    catalog[name.toLowerCase()] = {
+      name: name, category: cell('category'), description: cell('description'),
+      cost: cell('cost'), weight: cell('weight'), link: String(cell('link') || '').trim(),
+    };
+  }
+  return catalog;
+}
+
+// Fills what the form did not state: cost when fewer than 2 numbers
+// were given, weight when fewer than 3. Stated values always win.
+function applyCatalog(parsed, catalog) {
+  if (!parsed || !catalog) return parsed;
+  var ref = catalog[parsed.name.toLowerCase()];
+  if (!ref) return parsed;
+  if (parsed.given < 2 && Number(ref.cost) > 0) parsed.cost = Number(ref.cost);
+  if (parsed.given < 3 && Number(ref.weight) > 0) parsed.weight = Number(ref.weight);
+  return parsed;
 }
 
 
@@ -495,7 +569,8 @@ function parseItemFull(str) {
 
   if (negative) quantity = -Math.abs(quantity);
 
-  return { name: name, quantity: quantity, cost: cost, weight: weight };
+  // given: how many numbers were written, tells "omitted" from "0"
+  return { name: name, quantity: quantity, cost: cost, weight: weight, given: numbers.length };
 }
 
 /**
@@ -566,9 +641,9 @@ function updateInventoryMap(map, txn) {
 function lookupItem(map, charName, itemName) {
   var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
   if (key in map && map[key].quantity > 0) {
-    return { found: true, cost: map[key].cost || 0, weight: map[key].weight || '' };
+    return { found: true, quantity: map[key].quantity, cost: map[key].cost || 0, weight: map[key].weight || '' };
   }
-  return { found: false, cost: 'N/A', weight: '' };
+  return { found: false, quantity: 0, cost: 'N/A', weight: '' };
 }
 
 
@@ -632,9 +707,45 @@ function writeTxnRows(txnSheet, txns) {
 // INVENTORY SHEET BUILDER
 // ============================================================
 
+// Manual columns of the Inventory sheet, kept across rebuilds by
+// character + item: { key: { notes, link } }.
+// A link counts as manual unless it equals its cell note: links filled
+// from Items catalog carry the catalog URL as the note, so a link the
+// GM typed or changed differs from it and is kept, while an untouched
+// catalog link is refilled from the current catalog.
+function readInventoryManual(sheet) {
+  var kept = {};
+  if (sheet.getLastRow() <= 1) return kept;
+
+  var range = sheet.getDataRange();
+  var data = range.getValues();
+  var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var c = { ch: hdr.indexOf('character'), item: hdr.indexOf('item_name'),
+            notes: hdr.indexOf('notes'), link: hdr.indexOf('link') };
+  if (c.ch === -1 || c.item === -1) return kept;
+
+  var cellNotes = c.link === -1 ? [] :
+    sheet.getRange(1, c.link + 1, data.length, 1).getNotes();
+
+  for (var r = 1; r < data.length; r++) {
+    var ch = String(data[r][c.ch]).trim(), item = String(data[r][c.item]).trim();
+    if (!ch || !item) continue;
+
+    var notes = c.notes === -1 ? '' : String(data[r][c.notes] || '').trim();
+    var link = c.link === -1 ? '' : String(data[r][c.link] || '').trim();
+    var fromCatalog = String((cellNotes[r] || [''])[0] || '').trim();
+    if (link && link === fromCatalog) link = '';
+
+    if (notes || link) kept[ch.toLowerCase() + '|' + item.toLowerCase()] = { notes: notes, link: link };
+  }
+  return kept;
+}
+
 function buildInventorySheet(ss, txnSheet) {
   var sheetName = 'Inventory';
   var sheet = ss.getSheetByName(sheetName);
+  var kept = sheet ? readInventoryManual(sheet) : {};
+  var catalog = loadItemCatalog(ss);
   if (sheet) {
     var existingFilter = sheet.getFilter();
     if (existingFilter) existingFilter.remove();
@@ -673,7 +784,8 @@ function buildInventorySheet(ss, txnSheet) {
 
   var rows = [];
   rows.push(['character', 'item_name', 'source', 'cost', 'weight',
-             'quantity', 'total_value', 'notes']);
+             'quantity', 'total_value', 'notes', 'link']);
+  var LINK_COL = 9;
 
   for (var i = 0; i < order.length; i++) {
     var item = items[order[i]];
@@ -684,8 +796,17 @@ function buildInventorySheet(ss, txnSheet) {
     var sourceLabel = item.firstSource === 'game' ? 'Reward' : 'Bought';
     if (item.itemName.toLowerCase() === 'gold') sourceLabel = '';
 
+    var key = order[i];
+    var manual = kept[key] || {};
+    var ref = catalog[item.itemName.toLowerCase()];
+    var catLink = ref ? ref.link : '';
+    var link = manual.link || catLink;
+
+    // Last element is a helper: the catalog URL the link was taken from,
+    // stored as the cell note (see readInventoryManual); cut before writing
     rows.push([item.character, item.itemName, sourceLabel,
-               item.cost, item.weight, item.quantity, totalValue, '']);
+               item.cost, item.weight, item.quantity, totalValue,
+               manual.notes || '', link, manual.link ? '' : catLink]);
   }
 
   // Sort by character name (column 1), then item name (column 2)
@@ -697,10 +818,13 @@ function buildInventorySheet(ss, txnSheet) {
   });
   rows = [rows[0]].concat(dataRows);
   
+  var linkNotes = rows.slice(1).map(function(r) { return [r.pop()]; });
+
   if (rows.length <= 1) {
     sheet.getRange(1, 1, 1, rows[0].length).setValues([rows[0]]);
   } else {
     sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+    sheet.getRange(2, LINK_COL, linkNotes.length, 1).setNotes(linkNotes);
   }
 
   // Format header
@@ -712,7 +836,7 @@ function buildInventorySheet(ss, txnSheet) {
 
   // Highlight notes column
   if (rows.length > 1) {
-    sheet.getRange(2, 8, rows.length - 1, 1).setBackground('#FFF9E6');
+    sheet.getRange(2, 8, rows.length - 1, 2).setBackground('#FFF9E6');
   }
 
   // Alternate row colors
@@ -728,6 +852,7 @@ function buildInventorySheet(ss, txnSheet) {
     sheet.setColumnWidth(c, width + 30);
   }
   sheet.setColumnWidth(8, 250);
+  sheet.setColumnWidth(LINK_COL, 300);
 
   if (rows.length > 1) {
     sheet.getRange(1, 1, rows.length, rows[0].length).createFilter();
