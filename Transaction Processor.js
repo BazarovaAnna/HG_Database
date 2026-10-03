@@ -719,10 +719,14 @@ var INVENTORY_CATALOG_COLS = ['link', 'category'];
 
 // Manual columns of the Inventory sheet, kept across rebuilds by
 // character + item: { key: { notes, link, category } }.
-// A catalog-backed value counts as manual unless it equals its cell note:
-// values filled from Items catalog carry that same value as the note, so
-// one the GM typed or changed differs from it and is kept, while an
-// untouched catalog value is refilled from the current catalog.
+// A catalog-backed value counts as manual unless it equals the value the
+// rebuild filled in from Items catalog. That value is kept in a hidden
+// column "<name>_catalog" next to the visible ones, so one the GM typed
+// or changed differs from it and is kept, while an untouched catalog
+// value is refilled from the current catalog.
+// Older sheets kept the marker as a cell note; it is still read when the
+// hidden column is missing, so the first rebuild after the switch does
+// not mistake catalog values for manual ones.
 function readInventoryManual(sheet) {
   var kept = {};
   if (sheet.getLastRow() <= 1) return kept;
@@ -732,10 +736,11 @@ function readInventoryManual(sheet) {
   var ch = hdr.indexOf('character'), item = hdr.indexOf('item_name'), notesCol = hdr.indexOf('notes');
   if (ch === -1 || item === -1) return kept;
 
-  var cols = {}, cellNotes = {};
+  var cols = {}, markers = {}, cellNotes = {};
   INVENTORY_CATALOG_COLS.forEach(function(name) {
     cols[name] = hdr.indexOf(name);
-    cellNotes[name] = cols[name] === -1 ? [] :
+    markers[name] = hdr.indexOf(name + '_catalog');
+    cellNotes[name] = (markers[name] !== -1 || cols[name] === -1) ? [] :
       sheet.getRange(1, cols[name] + 1, data.length, 1).getNotes();
   });
 
@@ -747,7 +752,9 @@ function readInventoryManual(sheet) {
     var any = !!entry.notes;
     INVENTORY_CATALOG_COLS.forEach(function(name) {
       var v = cols[name] === -1 ? '' : String(data[r][cols[name]] || '').trim();
-      var fromCatalog = String((cellNotes[name][r] || [''])[0] || '').trim();
+      var fromCatalog = markers[name] !== -1
+        ? String(data[r][markers[name]] || '').trim()
+        : String((cellNotes[name][r] || [''])[0] || '').trim();
       entry[name] = (v && v !== fromCatalog) ? v : '';
       if (entry[name]) any = true;
     });
@@ -765,6 +772,7 @@ function buildInventorySheet(ss, txnSheet) {
     var existingFilter = sheet.getFilter();
     if (existingFilter) existingFilter.remove();
     sheet.clear();
+    sheet.clearNotes();
   } else {
     sheet = ss.insertSheet(sheetName);
   }
@@ -799,8 +807,9 @@ function buildInventorySheet(ss, txnSheet) {
 
   var rows = [];
   var NOTES_COL = 8;
+  var markerCols = INVENTORY_CATALOG_COLS.map(function(name) { return name + '_catalog'; });
   rows.push(['character', 'item_name', 'source', 'cost', 'weight',
-             'quantity', 'total_value', 'notes'].concat(INVENTORY_CATALOG_COLS));
+             'quantity', 'total_value', 'notes'].concat(INVENTORY_CATALOG_COLS, markerCols));
   var LINK_COL = NOTES_COL + 1 + INVENTORY_CATALOG_COLS.indexOf('link');
 
   for (var i = 0; i < order.length; i++) {
@@ -817,19 +826,18 @@ function buildInventorySheet(ss, txnSheet) {
     var ref = catalog[item.itemName.toLowerCase()] || {};
 
     // Catalog-backed columns: the manual value, else the catalog one.
-    // The last element is a helper holding the cell notes (the catalog
-    // value each cell was filled from, see readInventoryManual); it is
-    // cut off before writing.
-    var values = [], notes = [];
+    // Hidden marker columns record what was filled from the catalog
+    // (see readInventoryManual).
+    var values = [], marks = [];
     INVENTORY_CATALOG_COLS.forEach(function(name) {
       var fromCatalog = String(ref[name] || '').trim();
       values.push(manual[name] || fromCatalog);
-      notes.push(manual[name] ? '' : fromCatalog);
+      marks.push(manual[name] ? '' : fromCatalog);
     });
 
     rows.push([item.character, item.itemName, sourceLabel,
                item.cost, item.weight, item.quantity, totalValue,
-               manual.notes || ''].concat(values, [notes]));
+               manual.notes || ''].concat(values, marks));
   }
 
   // Sort by character name (column 1), then item name (column 2)
@@ -841,13 +849,10 @@ function buildInventorySheet(ss, txnSheet) {
   });
   rows = [rows[0]].concat(dataRows);
   
-  var cellNotes = rows.slice(1).map(function(r) { return r.pop(); });
-
   if (rows.length <= 1) {
     sheet.getRange(1, 1, 1, rows[0].length).setValues([rows[0]]);
   } else {
     sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
-    sheet.getRange(2, NOTES_COL + 1, cellNotes.length, INVENTORY_CATALOG_COLS.length).setNotes(cellNotes);
   }
 
   // Format header
@@ -880,6 +885,9 @@ function buildInventorySheet(ss, txnSheet) {
   if (rows.length > 1) {
     sheet.getRange(1, 1, rows.length, rows[0].length).createFilter();
   }
+
+  // Marker columns are for the script only
+  sheet.hideColumns(NOTES_COL + 1 + INVENTORY_CATALOG_COLS.length, markerCols.length);
 
   sheet.setFrozenRows(1);
   sheet.setTabColor('#FF6600');
