@@ -83,6 +83,7 @@ function findDiscrepancies() {
   var babProg = refData.bab;
   var saveProg = refData.saves;
   var deityTableFromRef = refData.deities;
+  var spellCatalog = loadSpellCatalog(ss);
 
   // --- Run checks ---
   var issues = [];
@@ -572,6 +573,16 @@ function findDiscrepancies() {
       }
     }
 
+    // ========================================
+    // CHECK 18: Spells against Spells catalog
+    // ========================================
+    var spellIssues = checkSpellsAgainstCatalog(spellCatalog, String(v(row, 'cast_class')),
+      classes.map(function(c) { return c.name; }),
+      spellLevels.map(function(sp) { return String(v(row, sp.listKey)); }));
+    for (var sii = 0; sii < spellIssues.length; sii++) {
+      issues.push([charName].concat(spellIssues[sii]));
+    }
+
   } // end character loop
 
 
@@ -679,6 +690,98 @@ function alignmentDistance(align1, align2) {
   var c2 = ALIGNMENT_COORDS[align2];
   if (!c1 || !c2) return -1;
   return Math.max(Math.abs(c1[0] - c2[0]), Math.abs(c1[1] - c2[1]));
+}
+
+
+// ============================================================
+// SPELL CATALOG CHECK
+// ============================================================
+// Sheet "Spells catalog" is filled by hand: spell_name | levels | link |
+// description, where levels reads "Bard 1, Cleric 1, Oracle 1". It holds
+// the popular spells only, so a spell missing from it is a hint (MINOR):
+// a typo or a rarer spell the GM may add. A catalogued spell that is not on
+// the caster's class list, or sits at another level, is a WARNING — domain,
+// bloodline and mystery spells legitimately come from outside the list.
+
+function spellKey(name) {
+  return String(name).trim().toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, ' ');
+}
+
+function loadSpellCatalog(ss) {
+  var catalog = { byName: {}, classes: {} };
+  var sheet = ss.getSheetByName('Spells catalog');
+  if (!sheet || sheet.getLastRow() <= 1) return catalog;
+
+  var data = sheet.getDataRange().getValues();
+  var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+  var nameCol = hdr.indexOf('spell_name'), levelsCol = hdr.indexOf('levels');
+  if (nameCol === -1 || levelsCol === -1) return catalog;
+
+  for (var r = 1; r < data.length; r++) {
+    var name = String(data[r][nameCol]).trim();
+    if (!name) continue;
+    var levels = {};
+    String(data[r][levelsCol]).split(',').forEach(function(part) {
+      var m = part.trim().match(/^(.+?)\s+(\d)$/);
+      if (!m) return;
+      levels[m[1]] = Number(m[2]);
+      catalog.classes[m[1]] = true;
+    });
+    catalog.byName[spellKey(name)] = { name: name, levels: levels };
+  }
+  return catalog;
+}
+
+// lists[0] is the cantrip list, lists[N] the level N list (comma-separated).
+// Casting classes come from cast_class ("Inquisitor 1", "Bard 2/Wizard 1"),
+// otherwise from the character's classes. Returns rows without the name.
+function checkSpellsAgainstCatalog(catalog, castClass, classNames, lists) {
+  var out = [];
+  if (!Object.keys(catalog.byName).length) return out;
+
+  var casters = String(castClass).split(/[\/,]/).map(function(s) {
+    return s.replace(/\d+/g, '').trim();
+  }).filter(function(s) { return s; });
+  if (!casters.length) casters = classNames;
+  casters = casters.filter(function(c) { return catalog.classes[c]; });
+
+  for (var lvl = 0; lvl < lists.length; lvl++) {
+    var names = String(lists[lvl] || '').split(',');
+    for (var n = 0; n < names.length; n++) {
+      var raw = names[n].trim();
+      if (!raw) continue;
+      var label = lvl === 0 ? 'Cantrips' : 'Level ' + lvl;
+      var spell = catalog.byName[spellKey(raw)];
+      if (!spell) {
+        out.push(['ℹ️ MINOR', 'Spells',
+          label + ': "' + raw + '" is not in Spells catalog',
+          'Check spelling or add it to Spells catalog', raw]);
+        continue;
+      }
+      if (!casters.length) continue;   // class not covered by the catalog
+
+      var onList = casters.filter(function(c) { return c in spell.levels; });
+      if (!onList.length) {
+        out.push(['⚠️ WARNING', 'Spells',
+          label + ': ' + spell.name + ' is not on the ' + casters.join('/') +
+          ' list (fine if it is a domain, bloodline or mystery spell)',
+          formatSpellLevels(spell.levels), casters.join('/') + ' ' + lvl]);
+        continue;
+      }
+      var atLevel = onList.some(function(c) { return spell.levels[c] === lvl; });
+      if (!atLevel) {
+        out.push(['⚠️ WARNING', 'Spells',
+          label + ': ' + spell.name + ' is listed at the wrong level',
+          onList.map(function(c) { return c + ' ' + spell.levels[c]; }).join(', '),
+          'Level ' + lvl]);
+      }
+    }
+  }
+  return out;
+}
+
+function formatSpellLevels(levels) {
+  return Object.keys(levels).map(function(c) { return c + ' ' + levels[c]; }).join(', ');
 }
 
 
