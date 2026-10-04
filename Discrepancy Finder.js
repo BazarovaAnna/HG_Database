@@ -715,6 +715,7 @@ function loadSpellCatalog(ss) {
   var data = sheet.getDataRange().getValues();
   var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
   var nameCol = hdr.indexOf('spell_name'), levelsCol = hdr.indexOf('levels');
+  var linkCol = hdr.indexOf('link');
   if (nameCol === -1 || levelsCol === -1) return catalog;
 
   for (var r = 1; r < data.length; r++) {
@@ -727,7 +728,10 @@ function loadSpellCatalog(ss) {
       levels[m[1]] = Number(m[2]);
       catalog.classes[m[1]] = true;
     });
-    catalog.byName[spellKey(name)] = { name: name, levels: levels };
+    catalog.byName[spellKey(name)] = {
+      name: name, levels: levels,
+      link: linkCol === -1 ? '' : String(data[r][linkCol] || '').trim(),
+    };
   }
   return catalog;
 }

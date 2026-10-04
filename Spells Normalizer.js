@@ -72,10 +72,18 @@ function parseSpells() {
     }
   }
 
+  // link comes from Spells catalog (loadSpellCatalog in Discrepancy Finder.js);
+  // a spell missing from the catalog gets none — add it to the catalog.
+  var catalog = loadSpellCatalog(ss);
+  function spellLink(name) {
+    var spell = catalog.byName[spellKey(name)];
+    return spell ? spell.link : '';
+  }
+
   var rows = [];
   rows.push([
     'character', 'level', 'cast_class',
-    'spell_level', 'spell_name', 'known', 'prepared', 'gm_notes'
+    'spell_level', 'spell_name', 'known', 'prepared', 'gm_notes', 'link'
   ]);
 
   for (var i = 4; i < data.length; i++) {
@@ -103,7 +111,7 @@ function parseSpells() {
             0, name,
             cantNums.known === -1 ? '∞' : cantNums.known,
             cantNums.prepared === -1 ? '∞' : cantNums.prepared,
-            note]);
+            note, spellLink(name)]);
         }
       }
     }
@@ -127,7 +135,7 @@ function parseSpells() {
             sl, name,
             nums.known === -1 ? '∞' : nums.known,
             nums.prepared === -1 ? '∞' : nums.prepared,
-            note]);
+            note, spellLink(name)]);
         }
       }
     }
@@ -190,6 +198,7 @@ function writeSpellSheet(ss, rows) {
     sheet.setColumnWidth(c, width + 30);
   }
   sheet.setColumnWidth(8, 250);
+  sheet.setColumnWidth(9, 340);
 
   // Align known/prepared to the right
   if (rows.length > 1) {
