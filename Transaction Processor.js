@@ -915,6 +915,17 @@ function buildInventorySheet(ss, txnSheet) {
 // HELPERS
 // ============================================================
 
+// Review status of a form response — the dropdown in the last column of
+// Registration, LvlUP and Inventory(raw). Only "approved" is processed; an
+// empty cell is a response not reviewed yet. The old checkbox values
+// (TRUE) still count as approved.
+var REVIEW_STATUS = {
+  pending:  'На рассмотрении',
+  rejected: 'Отклонено',
+  approved: 'Утверждено',
+};
+
 function isApproved(val) {
-  return val === true || val === 'TRUE' || val === 'True';
+  return val === true || val === 'TRUE' || val === 'True' ||
+         String(val).trim() === REVIEW_STATUS.approved;
 }

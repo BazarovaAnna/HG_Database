@@ -173,10 +173,11 @@ function phaseUndo(ss, lvlSheet, regSheet, logSheet, cols) {
         report.skippedFields += result.skipped;
         revertedLevels.push(entry.newLevel);
 
-        // Uncheck approve — track if it was still checked (cascade)
+        // Back to review — track if it was still approved (cascade). The
+        // level the GM rejected keeps the status the GM gave it.
         var wasApproved = lvlSheet.getRange(entry.lvlSheetRow, L.approved).getValue();
-        lvlSheet.getRange(entry.lvlSheetRow, L.approved).setValue(false);
         if (isApproved(wasApproved)) {
+          lvlSheet.getRange(entry.lvlSheetRow, L.approved).setValue(REVIEW_STATUS.pending);
           cascadedLevels.push(entry.newLevel);
         }
 
@@ -188,9 +189,9 @@ function phaseUndo(ss, lvlSheet, regSheet, logSheet, cols) {
     // Build detail message
     if (revertedLevels.length > 0) {
       var detail = charName + ': reverted levels ' + revertedLevels.join(', ') +
-        ' (triggered by unchecked level ' + earliestLevel + ')';
+        ' (triggered by level ' + earliestLevel + ' losing approval)';
       if (cascadedLevels.length > 0) {
-        detail += '\n    ⚠️ Auto-unchecked approved levels: ' + cascadedLevels.join(', ');
+        detail += '\n    ⚠️ Approved levels sent back to review: ' + cascadedLevels.join(', ');
       }
       report.details.push(detail);
     }
