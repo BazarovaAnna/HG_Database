@@ -197,9 +197,11 @@ function processInventory() {
 
   var inventory = buildInventoryMap(txnSheet);
   var catalog = loadItemCatalog(ss);
+  var characters = loadCharacterNames(ss);
 
   var processed = 0;
   var skipped = 0;
+  var notApplied = 0;
   var errors = [];
   var warnings = [];
 
@@ -213,12 +215,19 @@ function processInventory() {
     if (!charName) continue;
 
     var processKey = timestamp + '|inventory|' + charName.toLowerCase();
-    if (processedSet[processKey]) { skipped++; continue; }
+    if (processedSet[processKey] || processedSet[timestamp + '|request']) { skipped++; continue; }
 
     try {
-      // parseInventoryForm updates the inventory map itself, txn by txn,
-      // so an item received earlier in the same answer can be sold in it
-      var result = parseInventoryForm(row, I, inventory, charName, catalog);
+      // Both parsers update the inventory map txn by txn, so an item
+      // received earlier in the same answer can be sold in it
+      var result = isV2Request(row, I)
+        ? parseInventoryRequest(row, I, inventory, charName, catalog, characters)
+        : parseInventoryForm(row, I, inventory, charName, catalog);
+      if (result.errors && result.errors.length) {
+        for (var e = 0; e < result.errors.length; e++) errors.push(charName + ': ' + result.errors[e]);
+        notApplied++;
+        continue;
+      }
       writeTxnRows(txnSheet, result.txns);
       for (var w = 0; w < result.warnings.length; w++) {
         warnings.push(charName + ': ' + result.warnings[w]);
@@ -233,6 +242,9 @@ function processInventory() {
   var msg = 'Inventory Processed!\n\n' +
     '✅ Processed: ' + processed + '\n' +
     '⏭ Skipped (already done): ' + skipped + '\n';
+  if (notApplied > 0) {
+    msg += '⛔ Not applied — fix the answer in Inventory(raw) and run again: ' + notApplied + '\n';
+  }
   if (warnings.length > 0) {
     msg += '⚠️ Warnings:\n';
     for (var w = 0; w < warnings.length; w++) msg += '  • ' + warnings[w] + '\n';
@@ -624,7 +636,7 @@ function buildInventoryMap(txnSheet) {
 
     var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
     if (!(key in map)) {
-      map[key] = { quantity: 0, cost: cost, weight: weight };
+      map[key] = { name: itemName, quantity: 0, cost: cost, weight: weight };
     }
     map[key].quantity += qty;
     if (cost && cost !== 'N/A' && Number(cost) > 0) map[key].cost = cost;
@@ -637,7 +649,7 @@ function buildInventoryMap(txnSheet) {
 function updateInventoryMap(map, txn) {
   var key = txn.character.toLowerCase() + '|' + txn.itemName.toLowerCase();
   if (!(key in map)) {
-    map[key] = { quantity: 0, cost: txn.cost, weight: txn.weight };
+    map[key] = { name: txn.itemName, quantity: 0, cost: txn.cost, weight: txn.weight };
   }
   map[key].quantity += txn.quantity;
   if (txn.cost && txn.cost !== 'N/A' && Number(txn.cost) > 0) map[key].cost = txn.cost;
@@ -690,6 +702,9 @@ function getTxnProcessedSet(txnSheet) {
     } else {
       set[ts + '|inventory|' + charName] = true;
     }
+    // A form-v2 request may write nothing under its author's name
+    // (a transfer between two other characters)
+    if (REQUEST_SOURCES.indexOf(source) !== -1) set[ts + '|request'] = true;
   }
   return set;
 }
@@ -818,7 +833,7 @@ function buildInventorySheet(ss, txnSheet) {
 
     var costNum = Number(item.cost) || 0;
     var totalValue = costNum * item.quantity;
-    var sourceLabel = item.firstSource === 'game' ? 'Reward' : 'Bought';
+    var sourceLabel = { game: 'Reward', 'inventory-free': 'Free', transfer: 'Transfer' }[item.firstSource] || 'Bought';
     if (item.itemName.toLowerCase() === 'gold') sourceLabel = '';
 
     var key = order[i];

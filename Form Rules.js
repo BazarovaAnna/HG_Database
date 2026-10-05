@@ -34,9 +34,8 @@ var FORM_SHEETS = {
 // No other skill starts with K, so the second branch excludes it.
 var RX_SKILL_NAME = "(?:[Kk]nowledge [A-Za-z]+|[A-JL-Za-jl-z][A-Za-z' ]*(?: ?\\([^(),]+\\))?)";
 
-// Item name must not start with a digit: "Bedroll 2 0,1 5" splits into
+// Loot item name must not start with a digit: "Bedroll 2 0,1 5" splits into
 // "Bedroll 2 0" and "1 5", and the second part has no name.
-var RX_ITEM      = '[^,;\\d\\s][^,;]*';
 var RX_LOOT_ITEM = '-?[^,;:\\d\\s-][^,;:]*';
 
 var RX_AMOUNT = '[+-]?\\d+(?:\\.\\d+)?';
@@ -56,16 +55,18 @@ var RX = {
   skills:    '^\\s*' + RX_SKILL_NAME + ' \\d+(?:\\s*,\\s*' + RX_SKILL_NAME + ' \\d+)*\\s*,?\\s*$',
   // Level-up: a skill without a number means +1 rank
   newSkills: '^\\s*' + RX_SKILL_NAME + '(?: \\d+)?(?:\\s*,\\s*' + RX_SKILL_NAME + '(?: \\d+)?)*\\s*,?\\s*$',
-  items:    '^\\s*' + RX_ITEM + '(?:\\s*,\\s*' + RX_ITEM + ')*\\s*,?\\s*$',
   // Single-number answers are parsed by the sheet in its locale (ru_RU),
   // so a decimal comma is fine here. Inside lists only a dot works.
   gold:       '^\\d+(?:[.,]\\d+)?$',
-  goldSigned: '^[+-]?\\d+(?:[.,]\\d+)?$',
   // "Name: -10; Name: +13"
   goldDelta: '^\\s*[^,;:]+:\\s*' + RX_AMOUNT + '(?:\\s*;\\s*[^,;:]+:\\s*' + RX_AMOUNT + ')*\\s*;?\\s*$',
   // "Name: item 1 30, item; Name: -item"
   loot: '^\\s*[^,;:]+:\\s*' + RX_LOOT_ITEM + '(?:\\s*,\\s*' + RX_LOOT_ITEM + ')*' +
         '(?:\\s*;\\s*[^,;:]+:\\s*' + RX_LOOT_ITEM + '(?:\\s*,\\s*' + RX_LOOT_ITEM + ')*)*\\s*;?\\s*$',
+  // Inventory form v2: every non-empty line starts with + or a minus
+  worldItems: '^\\s*[+\\-−–—][^\\n]*(?:\\n\\s*(?:[+\\-−–—][^\\n]*)?)*\\s*$',
+  // Inventory form v2: every non-empty line is "From -> To: items"
+  transfers: '^\\s*[^\\n]*(?:->|→|>)[^\\n]*:[^\\n]*(?:\\n\\s*(?:[^\\n]*(?:->|→|>)[^\\n]*:[^\\n]*)?)*\\s*$',
   // "Old Spell -> New Spell, Old -> New"
   retrain: '^\\s*[^,>]+->[^,>]+(?:\\s*,\\s*[^,>]+->[^,>]+)*\\s*$',
 };
@@ -81,12 +82,12 @@ var HELP = {
   entries:   'Через запятую. Внутри скобок (...) и [...] запятых быть не должно',
   skills:    'Через запятую: навык и число рангов. Knowledge без скобок: knowledge arcana 1. Остальные со скобками: perform (dance) 2',
   newSkills: 'Через запятую: навык и число рангов (без числа = +1). Knowledge без скобок: knowledge arcana 1',
-  items:     'Через запятую: название кол-во цена вес. Дробные — через точку: 0.5',
   gold:      'Число: 42 или 42,37',
-  goldSigned: 'Число со знаком: -10 или +22,5',
   goldDelta: 'Имя: сумма; Имя: сумма. Дробные — через точку. Например: Аурелия: -10; Ке`цаль: +13.5',
   loot:      'Имя: предмет кол-во цена вес, предмет; Имя: -предмет. Дробные — через точку',
   retrain:   'Через запятую: Старое -> Новое',
+  worldItems: 'Каждая строка начинается с + или -: +2 Potion of Cure Light Wounds',
+  transfers:  'Каждая строка: кто -> кому: что. Например: John -> Betty: 11 gold',
   favClass:  'Название класса из списка, несколько — через /. Например: Bard или Fighter/Rogue',
 };
 
@@ -124,8 +125,8 @@ var FORM_RULES = {
     { titles: ['Spells retrained'], rx: 'retrain' },
   ],
   inventory: [
-    { titles: ['Items bought', 'Items sold', 'Items gifted', 'Items got'], rx: 'items' },
-    { titles: ['Other gold changes'], rx: 'goldSigned' },
+    { titles: ['Items and gold'], rx: 'worldItems' },
+    { titles: ['Transfers'], rx: 'transfers' },
   ],
   games: [
     { titles: ['Party experience'], whole: true },
@@ -200,7 +201,11 @@ function syncFormChoices() {
   }
 
   var inv = openLinkedForm(ss, 'inventory', report);
-  if (inv) setChoices(indexFormItems(inv), 'inventory', 'Character name', chars, report);
+  if (inv) {
+    var invItems = indexFormItems(inv);
+    setChoices(invItems, 'inventory', 'Character name', chars, report);
+    setChoices(invItems, 'inventory', 'Participants', chars, report);
+  }
 
   var games = openLinkedForm(ss, 'games', report);
   if (games) {
