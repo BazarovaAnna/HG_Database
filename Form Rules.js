@@ -1,7 +1,7 @@
 // ============================================================
 // PF1e Character Database — Form Rules
 // ============================================================
-// Keeps the four Google Forms in line with what the scripts and
+// Keeps the Google Forms in line with what the scripts and
 // Database formulas can parse:
 //   applyFormValidation() — response validation on free-text questions
 //   syncFormChoices()     — dropdown / checkbox options taken from the sheets
@@ -24,6 +24,7 @@ var FORM_SHEETS = {
   lvlup:        'LvlUP',
   inventory:    'Inventory(raw)',
   games:        'Games',
+  board:        'Bulletin Board',
 };
 
 
@@ -212,6 +213,11 @@ function syncFormChoices() {
     var gameItems = indexFormItems(games);
     setChoices(gameItems, 'games', 'Characters', chars, report);
     setChoices(gameItems, 'games', 'Master', masters, report);
+  }
+
+  var board = openLinkedForm(ss, 'board', report);
+  if (board) {
+    setChoices(indexFormItems(board), 'board', 'Author', chars, report);
   }
 
   showFormReport('Form choices synced', report);
