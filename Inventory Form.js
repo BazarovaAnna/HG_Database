@@ -19,9 +19,6 @@
 // item the character doesn't have, unknown character), nothing is
 // written and the request stays unprocessed — fix the answer in
 // Inventory(raw) and run again. Warnings (e.g. bought for 0) don't stop it.
-//
-// Legacy answers (old questions Items bought/sold/gifted/got) are still
-// read by parseInventoryForm in Transaction Processor.js.
 // ============================================================
 
 // Transactions.source values written by this form
@@ -29,11 +26,6 @@ var REQUEST_SOURCES = ['inventory', 'inventory-free', 'transfer'];
 
 var GOLD_NAMES = ['gold', 'gp', 'зм', 'золото', 'золота'];
 
-
-function isV2Request(row, I) {
-  return !!(String(getField(row, I, 'worldItems') || '').trim() ||
-            String(getField(row, I, 'transfers') || '').trim());
-}
 
 // Returns { txns, warnings, errors }. txns is empty when errors isn't.
 function parseInventoryRequest(row, I, inventory, charName, catalog, characters) {

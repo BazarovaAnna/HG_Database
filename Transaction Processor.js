@@ -218,11 +218,9 @@ function processInventory() {
     if (processedSet[processKey] || processedSet[timestamp + '|request']) { skipped++; continue; }
 
     try {
-      // Both parsers update the inventory map txn by txn, so an item
-      // received earlier in the same answer can be sold in it
-      var result = isV2Request(row, I)
-        ? parseInventoryRequest(row, I, inventory, charName, catalog, characters)
-        : parseInventoryForm(row, I, inventory, charName, catalog);
+      // The parser updates the inventory map txn by txn, so an item
+      // received earlier in the same answer can be used up in it
+      var result = parseInventoryRequest(row, I, inventory, charName, catalog, characters);
       if (result.errors && result.errors.length) {
         for (var e = 0; e < result.errors.length; e++) errors.push(charName + ': ' + result.errors[e]);
         notApplied++;
@@ -341,154 +339,6 @@ function parseGameForm(row, G, catalog) {
 }
 
 
-// ============================================================
-// INVENTORY FORM PARSER
-// ============================================================
-
-function parseInventoryForm(row, I, inventory, charName, catalog) {
-  var txns = [];
-  var warnings = [];
-  var timestamp = String(getField(row, I, 'timestamp'));
-  var comment = String(getField(row, I, 'comment') || '').trim();
-
-  // Every txn goes through here so the inventory map stays current:
-  // an item got earlier in this answer can be sold later in it.
-  function add(txn) {
-    txns.push(txn);
-    updateInventoryMap(inventory, txn);
-  }
-  function list(field) {
-    var s = String(getField(row, I, field) || '').trim();
-    return s ? s.split(',') : [];
-  }
-
-  // --- Items bought: cost and weight from the catalog if omitted ---
-  var bought = list('itemsBought');
-  for (var i = 0; i < bought.length; i++) {
-    var parsed = applyCatalog(parseItemFull(bought[i].trim()), catalog);
-    if (!parsed) continue;
-
-    // An explicitly written 0 is a choice; an omitted price with no
-    // catalog entry is probably a mistake — record it, but say so
-    if (parsed.given < 2 && !(Number(parsed.cost) > 0)) {
-      warnings.push('"' + parsed.name + '" bought for 0: no price stated and not in catalog');
-    }
-
-    var qty = Math.abs(parsed.quantity);
-    add({
-      timestamp: timestamp, source: 'inventory', character: charName,
-      itemName: parsed.name, quantity: qty,
-      cost: parsed.cost, weight: parsed.weight,
-      notes: comment,
-    });
-
-    var totalCost = roundGold(parsed.cost * qty);
-    if (totalCost > 0) {
-      add({
-        timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: 'gold', quantity: -totalCost, cost: 1, weight: '',
-        notes: 'Bought ' + (qty > 1 ? qty + ' ' : '') + parsed.name,
-      });
-    }
-  }
-
-  // --- Items got: free, cost and weight from the catalog if omitted ---
-  var got = list('itemsGot');
-  for (var i = 0; i < got.length; i++) {
-    var parsed = applyCatalog(parseItemFull(got[i].trim()), catalog);
-    if (!parsed) continue;
-
-    add({
-      timestamp: timestamp, source: 'inventory', character: charName,
-      itemName: parsed.name, quantity: Math.abs(parsed.quantity),
-      cost: parsed.cost, weight: parsed.weight,
-      notes: comment,
-    });
-  }
-
-  // --- Items sold: only what the character has ---
-  // "name qty price": price is what the character got per item.
-  // Without a price: half the catalog price, else half the price it was
-  // bought for, else nothing (with a warning).
-  var sold = list('itemsSold');
-  for (var i = 0; i < sold.length; i++) {
-    var parsed = parseItemFull(sold[i].trim());
-    if (!parsed) continue;
-
-    var qty = Math.abs(parsed.quantity);
-    var lookup = lookupItem(inventory, charName, parsed.name);
-    if (!lookup.found || lookup.quantity < qty) {
-      warnings.push('"' + parsed.name + '" x' + qty + ' not sold: character has ' +
-                    (lookup.found ? lookup.quantity : 0));
-      continue;
-    }
-
-    add({
-      timestamp: timestamp, source: 'inventory', character: charName,
-      itemName: parsed.name, quantity: -qty,
-      cost: lookup.cost, weight: lookup.weight,
-      notes: comment,
-    });
-
-    var price = null, how = '';
-    var ref = catalog[parsed.name.toLowerCase()];
-    if (parsed.given >= 2) {
-      price = parsed.cost; how = 'stated price';
-    } else if (ref && Number(ref.cost) > 0) {
-      price = Number(ref.cost) / 2; how = 'half catalog price';
-    } else if (Number(lookup.cost) > 0) {
-      price = Number(lookup.cost) / 2; how = 'half purchase price';
-    }
-
-    if (price === null) {
-      warnings.push('"' + parsed.name + '" sold for 0: no price stated, none in catalog or inventory');
-      continue;
-    }
-    var sellGold = roundGold(price * qty);
-    if (sellGold > 0) {
-      add({
-        timestamp: timestamp, source: 'inventory', character: charName,
-        itemName: 'gold', quantity: sellGold, cost: 1, weight: '',
-        notes: 'Sold ' + (qty > 1 ? qty + ' ' : '') + parsed.name + ' (' + how + ')',
-      });
-    }
-  }
-
-  // --- Items gifted: only what the character has ---
-  var gifted = list('itemsGifted');
-  for (var i = 0; i < gifted.length; i++) {
-    var parsed = parseItemSimple(gifted[i].trim());
-    if (!parsed) continue;
-
-    var qty = Math.abs(parsed.quantity);
-    var lookup = lookupItem(inventory, charName, parsed.name);
-    if (!lookup.found || lookup.quantity < qty) {
-      warnings.push('"' + parsed.name + '" x' + qty + ' not gifted: character has ' +
-                    (lookup.found ? lookup.quantity : 0));
-      continue;
-    }
-
-    add({
-      timestamp: timestamp, source: 'inventory', character: charName,
-      itemName: parsed.name, quantity: -qty,
-      cost: lookup.cost, weight: lookup.weight,
-      notes: comment,
-    });
-  }
-
-  // --- Gold changes ---
-  var goldChange = Number(getField(row, I, 'goldDelta')) || 0;
-  if (goldChange !== 0) {
-    add({
-      timestamp: timestamp, source: 'inventory', character: charName,
-      itemName: 'gold', quantity: goldChange, cost: 1, weight: '',
-      notes: comment,
-    });
-  }
-
-  return { txns: txns, warnings: warnings };
-}
-
 // Gold to the copper: 2.5 gp stays 2.5, float noise is cut off
 function roundGold(x) {
   return Math.round(x * 100) / 100;
@@ -591,31 +441,6 @@ function parseItemFull(str) {
   return { name: name, quantity: quantity, cost: cost, weight: weight, given: numbers.length };
 }
 
-/**
- * Simple format: "item name [qty]"
- * Only quantity, no cost or weight.
- */
-function parseItemSimple(str) {
-  if (!str) return null;
-  str = str.trim();
-  if (!str) return null;
-
-  var parts = str.split(/\s+/);
-  if (parts.length === 0) return null;
-
-  var quantity = 1;
-  var lastToken = parts[parts.length - 1];
-  if (!isNaN(lastToken) && lastToken !== '' && parts.length > 1) {
-    quantity = Number(parts.pop());
-  }
-
-  var name = parts.join(' ').trim();
-  if (!name) return null;
-
-  return { name: name, quantity: quantity };
-}
-
-
 // ============================================================
 // INVENTORY LOOKUP
 // ============================================================
@@ -655,15 +480,6 @@ function updateInventoryMap(map, txn) {
   if (txn.cost && txn.cost !== 'N/A' && Number(txn.cost) > 0) map[key].cost = txn.cost;
   if (txn.weight && txn.weight !== '' && Number(txn.weight) > 0) map[key].weight = txn.weight;
 }
-
-function lookupItem(map, charName, itemName) {
-  var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
-  if (key in map && map[key].quantity > 0) {
-    return { found: true, quantity: map[key].quantity, cost: map[key].cost || 0, weight: map[key].weight || '' };
-  }
-  return { found: false, quantity: 0, cost: 'N/A', weight: '' };
-}
-
 
 // ============================================================
 // TRANSACTIONS SHEET
