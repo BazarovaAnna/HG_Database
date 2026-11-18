@@ -45,6 +45,11 @@ function parseSpells() {
   return { known: known, prepared: prepared };
 }
 
+  var catalog = loadSpellCatalog(ss);
+  function noteKey(character, level, name) {
+    return character.trim().toLowerCase() + '|' + level + '|' + spellKey(canonicalSpellName(name, catalog));
+  }
+
   // --- Save existing GM notes before clearing ---
   var gmNotes = {};
   var spellSheet = ss.getSheetByName('Spells');
@@ -63,28 +68,32 @@ function parseSpells() {
       for (var r = 1; r < existingData.length; r++) {
         var val = existingData[r][notesCol];
         if (val !== '' && val !== undefined && val !== null) {
-          var key = String(existingData[r][charCol]).trim().toLowerCase() + '|' +
-                    String(existingData[r][lvlCol]) + '|' +
-                    String(existingData[r][nameCol]).trim().toLowerCase();
-          gmNotes[key] = val;
+          var key = noteKey(String(existingData[r][charCol]), existingData[r][lvlCol],
+                            String(existingData[r][nameCol]));
+          var notes = [gmNotes[key], val].filter(function(note) { return note !== undefined; });
+          gmNotes[key] = Array.from(new Set(notes)).join('\n');
         }
       }
     }
   }
 
-  // link comes from Spells catalog (loadSpellCatalog in Discrepancy Finder.js);
-  // a spell missing from the catalog gets none — add it to the catalog.
-  var catalog = loadSpellCatalog(ss);
-  function spellLink(name) {
-    var spell = catalog.byName[spellKey(name)];
-    return spell ? spell.link : '';
-  }
-
   var rows = [];
   rows.push([
     'character', 'level', 'cast_class',
-    'spell_level', 'spell_name', 'known', 'prepared', 'gm_notes', 'link'
+    'spell_level', 'spell_name', 'known', 'prepared', 'gm_notes', 'link', 'aliases'
   ]);
+
+  function appendSpells(list, character, level, castClass, spellLevel, counts) {
+    splitSpellList(list, catalog).forEach(function(name) {
+      var spell = catalog.byName[spellKey(name)];
+      rows.push([character, level, castClass,
+        spellLevel, spell ? spell.name : name,
+        counts.known === -1 ? '∞' : counts.known,
+        counts.prepared === -1 ? '∞' : counts.prepared,
+        gmNotes[noteKey(character, spellLevel, name)] || '',
+        spell ? spell.link : '', spell ? spell.aliases : '']);
+    });
+  }
 
   for (var i = 4; i < data.length; i++) {
     var row = data[i];
@@ -98,23 +107,7 @@ function parseSpells() {
     if (!isCaster || isCaster === 'no' || isCaster === 'нет') continue;
 
     // Cantrips
-    var cantNums = parseNum(v(row, 'cant_num'));
-    var cantStr = String(v(row, 'cant')).trim();
-    if (cantStr) {
-      var cantrips = cantStr.split(',');
-      for (var j = 0; j < cantrips.length; j++) {
-        var name = cantrips[j].trim();
-        if (name) {
-          var noteKey = charName.toLowerCase() + '|0|' + name.toLowerCase();
-          var note = (noteKey in gmNotes) ? gmNotes[noteKey] : '';
-          rows.push([charName, level, castCls,
-            0, name,
-            cantNums.known === -1 ? '∞' : cantNums.known,
-            cantNums.prepared === -1 ? '∞' : cantNums.prepared,
-            note, spellLink(name)]);
-        }
-      }
-    }
+    appendSpells(String(v(row, 'cant')), charName, level, castCls, 0, parseNum(v(row, 'cant_num')));
 
     // Spell levels 1-9
     for (var sl = 1; sl <= 9; sl++) {
@@ -122,22 +115,7 @@ function parseSpells() {
       var listKey = 'spell' + sl;
 
       var nums = parseNum(v(row, numKey));
-      var spellStr = String(v(row, listKey)).trim();
-      if (!spellStr) continue;
-
-      var spells = spellStr.split(',');
-      for (var j = 0; j < spells.length; j++) {
-        var name = spells[j].trim();
-        if (name) {
-          var noteKey = charName.toLowerCase() + '|' + sl + '|' + name.toLowerCase();
-          var note = (noteKey in gmNotes) ? gmNotes[noteKey] : '';
-          rows.push([charName, level, castCls,
-            sl, name,
-            nums.known === -1 ? '∞' : nums.known,
-            nums.prepared === -1 ? '∞' : nums.prepared,
-            note, spellLink(name)]);
-        }
-      }
+      appendSpells(String(v(row, listKey)), charName, level, castCls, sl, nums);
     }
   }
 

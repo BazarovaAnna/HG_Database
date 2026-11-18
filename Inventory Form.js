@@ -74,7 +74,7 @@ function applyWorld(text, charName, inv, catalog, note, add, out) {
     }
 
     if (e.sign > 0) {
-      var ref = catalog[e.name.toLowerCase()];
+      var ref = catalog[itemKey(e.name)];
       var name = ref ? ref.name : e.name;
       var value = e.price !== null ? e.price : (ref && ref.cost !== '' ? Number(ref.cost) : null);
       var weight = e.weight !== null ? e.weight : (ref ? ref.weight : '');
@@ -112,7 +112,7 @@ function applyWorld(text, charName, inv, catalog, note, add, out) {
     if (e.price !== null) {
       price = e.price; how = 'stated price';
     } else if (e.sell) {
-      var ref2 = catalog[have.name.toLowerCase()];
+      var ref2 = catalog[itemKey(have.name)];
       if (ref2 && Number(ref2.cost) > 0) { price = Number(ref2.cost) / 2; how = 'half catalog price'; }
       else if (Number(have.cost) > 0) { price = Number(have.cost) / 2; how = 'half its value'; }
       else out.warnings.push('"' + have.name + '" sold for 0: no price stated, none in catalog or inventory');
@@ -147,7 +147,7 @@ function parseWorldEntry(raw, catalog) {
   // One "(…)" group of price / weight / sell / free at the end. A name
   // that itself ends in parentheses wins if it is in the catalog:
   // "Arrows (20)" is the item, "Arrows (20) (1)" costs 1.
-  if (!catalog[rest.trim().toLowerCase()]) {
+  if (!catalog[itemKey(rest)]) {
     var p = rest.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
     var parsed = p ? parseDetails(p[2]) : null;
     if (parsed) {
@@ -274,24 +274,16 @@ function copyInventoryMap(map) {
   return copy;
 }
 
-// The item under the written name, or under its catalog spelling
-// ("spell component pouch" -> "Spell component pouch").
+// Inventory totals use the primary name for every catalog alias.
 function findOwned(inv, charName, name, catalog) {
-  var names = [name];
-  var ref = catalog[name.toLowerCase()];
-  if (ref && ref.name !== name) names.push(ref.name);
-  for (var i = 0; i < names.length; i++) {
-    var key = charName.toLowerCase() + '|' + names[i].toLowerCase();
-    if (key in inv && inv[key].quantity > 0) {
-      return { found: true, name: originalName(inv, key, names[i]), quantity: inv[key].quantity,
-               cost: inv[key].cost || 0, weight: inv[key].weight || '' };
-    }
+  var key = inventoryItemKey(charName, canonicalItemName(name, catalog));
+  var item = inv[key];
+  if (item && item.quantity > 0) {
+    return { found: true, name: item.name, quantity: item.quantity,
+             cost: item.cost || 0, weight: item.weight || '' };
   }
   return { found: false, quantity: 0 };
 }
-
-// Map keys are lower case; the item keeps the spelling it was first written with
-function originalName(inv, key, written) { return inv[key].name || written; }
 
 function goldOf(inv, charName) {
   var key = charName.toLowerCase() + '|gold';

@@ -594,7 +594,7 @@ function findDiscrepancies() {
     var name = String(v(data[i], 'char')).trim();
     if (name) knownChars[name.toLowerCase()] = true;
   }
-  var inventoryIssues = checkInventory(ss.getSheetByName('Transactions'), knownChars);
+  var inventoryIssues = checkInventory(ss.getSheetByName('Transactions'), knownChars, loadItemCatalog(ss));
   for (var ii = 0; ii < inventoryIssues.length; ii++) issues.push(inventoryIssues[ii]);
 
 
@@ -627,7 +627,7 @@ function findDiscrepancies() {
 // items below zero (taken away under a different name than received),
 // negative gold, and transactions for characters missing from Database.
 
-function checkInventory(txnSheet, knownChars) {
+function checkInventory(txnSheet, knownChars, catalog) {
   var rows = [];
   if (!txnSheet || txnSheet.getLastRow() <= 1) return rows;
 
@@ -645,7 +645,8 @@ function checkInventory(txnSheet, knownChars) {
       unknownChars[charName] = (unknownChars[charName] || 0) + 1;
     }
 
-    var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
+    itemName = canonicalItemName(itemName, catalog);
+    var key = inventoryItemKey(charName, itemName);
     if (!(key in items)) {
       items[key] = { character: charName, itemName: itemName, quantity: 0 };
       order.push(key);
@@ -704,11 +705,17 @@ function alignmentDistance(align1, align2) {
 // bloodline and mystery spells legitimately come from outside the list.
 
 function spellKey(name) {
-  return String(name).trim().toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, ' ');
+  return String(name).trim().toLowerCase().replace(/[’`]/g, "'").replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ');
+}
+
+function canonicalSpellName(name, catalog) {
+  var spell = catalog.byName[spellKey(name)];
+  return spell ? spell.name : name;
 }
 
 function loadSpellCatalog(ss) {
-  var catalog = { byName: {}, classes: {} };
+  var catalog = { byName: Object.create(null), classes: {}, maxNameParts: 1 };
   var sheet = ss.getSheetByName('Spells catalog');
   if (!sheet || sheet.getLastRow() <= 1) return catalog;
 
@@ -719,8 +726,8 @@ function loadSpellCatalog(ss) {
   if (nameCol === -1 || levelsCol === -1) return catalog;
 
   for (var r = 1; r < data.length; r++) {
-    var name = String(data[r][nameCol]).trim();
-    if (!name) continue;
+    var names = splitCatalogNames(data[r][nameCol]);
+    if (!names.length) continue;
     var levels = {};
     String(data[r][levelsCol]).split(',').forEach(function(part) {
       var m = part.trim().match(/^(.+?)\s+(\d)$/);
@@ -728,12 +735,37 @@ function loadSpellCatalog(ss) {
       levels[m[1]] = Number(m[2]);
       catalog.classes[m[1]] = true;
     });
-    catalog.byName[spellKey(name)] = {
-      name: name, levels: levels,
+    var entry = {
+      name: names[0], aliases: names.slice(1).join('|'), levels: levels,
       link: linkCol === -1 ? '' : String(data[r][linkCol] || '').trim(),
     };
+    indexCatalogNames(catalog.byName, names, entry, spellKey, 'Spells catalog', r + 1);
+    names.forEach(function(name) {
+      catalog.maxNameParts = Math.max(catalog.maxNameParts, name.split(',').length);
+    });
   }
   return catalog;
+}
+
+// A comma normally separates spells. A longer, exact catalog name can
+// contain it, as in "Невидимость, высшая".
+function splitSpellList(value, catalog) {
+  var parts = String(value || '').split(',').map(function(part) { return part.trim(); });
+  var names = [];
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    var name = parts[i];
+    var last = Math.min(parts.length, i + catalog.maxNameParts);
+    for (var end = last; end > i + 1; end--) {
+      var candidate = parts.slice(i, end).join(', ');
+      if (!catalog.byName[spellKey(candidate)]) continue;
+      name = candidate;
+      i = end - 1;
+      break;
+    }
+    names.push(name);
+  }
+  return names;
 }
 
 // lists[0] is the cantrip list, lists[N] the level N list (comma-separated).
@@ -750,7 +782,7 @@ function checkSpellsAgainstCatalog(catalog, castClass, classNames, lists) {
   casters = casters.filter(function(c) { return catalog.classes[c]; });
 
   for (var lvl = 0; lvl < lists.length; lvl++) {
-    var names = String(lists[lvl] || '').split(',');
+    var names = splitSpellList(lists[lvl], catalog);
     for (var n = 0; n < names.length; n++) {
       var raw = names[n].trim();
       if (!raw) continue;

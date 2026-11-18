@@ -195,8 +195,8 @@ function processInventory() {
   var processedSet = getTxnProcessedSet(txnSheet);
   var invData = invSheet.getDataRange().getValues();
 
-  var inventory = buildInventoryMap(txnSheet);
   var catalog = loadItemCatalog(ss);
+  var inventory = buildInventoryMap(txnSheet, catalog);
   var characters = loadCharacterNames(ss);
 
   var processed = 0;
@@ -354,7 +354,7 @@ function roundGold(x) {
 // takes the link from here unless one was entered by hand.
 
 function loadItemCatalog(ss) {
-  var catalog = {};
+  var catalog = Object.create(null);
   var sheet = ss.getSheetByName('Items catalog');
   if (!sheet || sheet.getLastRow() <= 1) return catalog;
 
@@ -368,14 +368,16 @@ function loadItemCatalog(ss) {
   if (c.name === -1) return catalog;
 
   for (var r = 1; r < data.length; r++) {
-    var name = String(data[r][c.name]).trim();
-    if (!name) continue;
+    var names = splitCatalogNames(data[r][c.name]);
+    if (!names.length) continue;
     var row = data[r];
     var cell = function(k) { return c[k] === -1 ? '' : row[c[k]]; };
-    catalog[name.toLowerCase()] = {
-      name: name, category: cell('category'), description: cell('description'),
+    var entry = {
+      name: names[0], aliases: names.slice(1).join('|'),
+      category: cell('category'), description: cell('description'),
       cost: cell('cost'), weight: cell('weight'), link: String(cell('link') || '').trim(),
     };
+    indexCatalogNames(catalog, names, entry, itemKey, 'Items catalog', r + 1);
   }
   return catalog;
 }
@@ -384,8 +386,9 @@ function loadItemCatalog(ss) {
 // were given, weight when fewer than 3. Stated values always win.
 function applyCatalog(parsed, catalog) {
   if (!parsed || !catalog) return parsed;
-  var ref = catalog[parsed.name.toLowerCase()];
+  var ref = catalog[itemKey(parsed.name)];
   if (!ref) return parsed;
+  parsed.name = ref.name;
   if (parsed.given < 2 && Number(ref.cost) > 0) parsed.cost = Number(ref.cost);
   if (parsed.given < 3 && Number(ref.weight) > 0) parsed.weight = Number(ref.weight);
   return parsed;
@@ -445,7 +448,7 @@ function parseItemFull(str) {
 // INVENTORY LOOKUP
 // ============================================================
 
-function buildInventoryMap(txnSheet) {
+function buildInventoryMap(txnSheet, catalog) {
   var map = {};
   if (txnSheet.getLastRow() <= 1) return map;
 
@@ -459,7 +462,8 @@ function buildInventoryMap(txnSheet) {
 
     if (!charName || !itemName) continue;
 
-    var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
+    itemName = canonicalItemName(itemName, catalog);
+    var key = inventoryItemKey(charName, itemName);
     if (!(key in map)) {
       map[key] = { name: itemName, quantity: 0, cost: cost, weight: weight };
     }
@@ -472,7 +476,7 @@ function buildInventoryMap(txnSheet) {
 }
 
 function updateInventoryMap(map, txn) {
-  var key = txn.character.toLowerCase() + '|' + txn.itemName.toLowerCase();
+  var key = inventoryItemKey(txn.character, txn.itemName);
   if (!(key in map)) {
     map[key] = { name: txn.itemName, quantity: 0, cost: txn.cost, weight: txn.weight };
   }
@@ -558,7 +562,7 @@ var INVENTORY_CATALOG_COLS = ['link', 'category'];
 // Older sheets kept the marker as a cell note; it is still read when the
 // hidden column is missing, so the first rebuild after the switch does
 // not mistake catalog values for manual ones.
-function readInventoryManual(sheet) {
+function readInventoryManual(sheet, catalog) {
   var kept = {};
   if (sheet.getLastRow() <= 1) return kept;
 
@@ -589,7 +593,20 @@ function readInventoryManual(sheet) {
       entry[name] = (v && v !== fromCatalog) ? v : '';
       if (entry[name]) any = true;
     });
-    if (any) kept[c.toLowerCase() + '|' + it.toLowerCase()] = entry;
+    if (!any) continue;
+    var key = inventoryItemKey(c, canonicalItemName(it, catalog));
+    var previous = kept[key] || {};
+    // A hyperlink column can only hold one URL. Keep any additional
+    // manual link in the notes when two old rows become one item.
+    if (previous.link && entry.link && previous.link !== entry.link) {
+      entry.notes = [entry.notes, entry.link].filter(Boolean).join('\n');
+      entry.link = '';
+    }
+    Object.keys(entry).forEach(function(field) {
+      var values = [previous[field], entry[field]].filter(Boolean);
+      previous[field] = Array.from(new Set(values)).join('\n');
+    });
+    kept[key] = previous;
   }
   return kept;
 }
@@ -597,8 +614,8 @@ function readInventoryManual(sheet) {
 function buildInventorySheet(ss, txnSheet) {
   var sheetName = 'Inventory';
   var sheet = ss.getSheetByName(sheetName);
-  var kept = sheet ? readInventoryManual(sheet) : {};
   var catalog = loadItemCatalog(ss);
+  var kept = sheet ? readInventoryManual(sheet, catalog) : {};
   if (sheet) {
     var existingFilter = sheet.getFilter();
     if (existingFilter) existingFilter.remove();
@@ -608,7 +625,9 @@ function buildInventorySheet(ss, txnSheet) {
     sheet = ss.insertSheet(sheetName);
   }
 
-  var data = txnSheet.getRange(2, 1, txnSheet.getLastRow() - 1, 8).getValues();
+  var data = txnSheet.getLastRow() > 1
+    ? txnSheet.getRange(2, 1, txnSheet.getLastRow() - 1, 8).getValues()
+    : [];
 
   var items = {};
   var order = [];
@@ -622,7 +641,8 @@ function buildInventorySheet(ss, txnSheet) {
 
     if (!charName || !itemName) continue;
 
-    var key = charName.toLowerCase() + '|' + itemName.toLowerCase();
+    itemName = canonicalItemName(itemName, catalog);
+    var key = inventoryItemKey(charName, itemName);
     if (!(key in items)) {
       items[key] = {
         character: charName, itemName: itemName,
@@ -640,7 +660,7 @@ function buildInventorySheet(ss, txnSheet) {
   var NOTES_COL = 8;
   var markerCols = INVENTORY_CATALOG_COLS.map(function(name) { return name + '_catalog'; });
   rows.push(['character', 'item_name', 'source', 'cost', 'weight',
-             'quantity', 'total_value', 'notes'].concat(INVENTORY_CATALOG_COLS, markerCols));
+             'quantity', 'total_value', 'notes'].concat(INVENTORY_CATALOG_COLS, markerCols, ['aliases']));
   var LINK_COL = NOTES_COL + 1 + INVENTORY_CATALOG_COLS.indexOf('link');
 
   for (var i = 0; i < order.length; i++) {
@@ -654,7 +674,7 @@ function buildInventorySheet(ss, txnSheet) {
 
     var key = order[i];
     var manual = kept[key] || {};
-    var ref = catalog[item.itemName.toLowerCase()] || {};
+    var ref = catalog[itemKey(item.itemName)] || {};
 
     // Catalog-backed columns: the manual value, else the catalog one.
     // Hidden marker columns record what was filled from the catalog
@@ -668,7 +688,7 @@ function buildInventorySheet(ss, txnSheet) {
 
     rows.push([item.character, item.itemName, sourceLabel,
                item.cost, item.weight, item.quantity, totalValue,
-               manual.notes || ''].concat(values, marks));
+               manual.notes || ''].concat(values, marks, [ref.aliases || '']));
   }
 
   // Sort by character name (column 1), then item name (column 2)

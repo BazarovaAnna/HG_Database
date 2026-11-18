@@ -48,10 +48,11 @@ function processLevelUps() {
   if (!regSheet) { SpreadsheetApp.getUi().alert('Sheet "Registration" not found!'); return; }
 
   var cols = loadColumnMappings(ss);
+  var spellCatalog = loadSpellCatalog(ss);
   var logSheet = getOrCreateLogSheet(ss);
 
   var undoReport = phaseUndo(ss, lvlSheet, regSheet, logSheet, cols);
-  var applyReport = phaseApply(ss, lvlSheet, regSheet, logSheet, cols);
+  var applyReport = phaseApply(ss, lvlSheet, regSheet, logSheet, cols, spellCatalog);
 
   // --- Summary ---
   var msg = 'Level-Up Processing Complete!\n\n';
@@ -269,7 +270,7 @@ function revertLevelUp(regSheet, logSheet, logData, timestamp, charName, cols) {
 // PHASE 2: APPLY
 // ============================================================
 
-function phaseApply(ss, lvlSheet, regSheet, logSheet, cols) {
+function phaseApply(ss, lvlSheet, regSheet, logSheet, cols, spellCatalog) {
   var report = { processed: 0, skipped: 0, errors: [] };
   var L = cols.lvlup;
   var R = cols.registration;
@@ -299,7 +300,7 @@ function phaseApply(ss, lvlSheet, regSheet, logSheet, cols) {
     }
 
     try {
-      var changes = applyLevelUp(regSheet, row, regRow, L, R);
+      var changes = applyLevelUp(regSheet, row, regRow, L, R, spellCatalog);
       var gmNotes = String(getField(row, L, 'gmNotes') || '').trim();
       var newLevel = getField(row, L, 'newLevel');
       logLevelUp(logSheet, timestamp, charName, newLevel, changes, gmNotes);
@@ -313,7 +314,7 @@ function phaseApply(ss, lvlSheet, regSheet, logSheet, cols) {
 }
 
 
-function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
+function applyLevelUp(regSheet, lvlRow, regRow, L, R, spellCatalog) {
   var changes = [];
 
   // --- 1. Replace input_lvl ---
@@ -529,7 +530,7 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R) {
   // --- 11. Spell retraining ---
   var retrained = String(getField(lvlRow, L, 'spellsRetrained') || '').trim();
   if (retrained && R.cant) {
-    var retrainChanges = processRetraining(regSheet, regRow, retrained, R);
+    var retrainChanges = processRetraining(regSheet, regRow, retrained, R, spellCatalog);
     for (var rc = 0; rc < retrainChanges.length; rc++) {
       changes.push(retrainChanges[rc]);
     }
@@ -617,7 +618,7 @@ function parseLvlSkillEntry(entry) {
   return { name: name, ranks: ranks };
 }
 
-function processRetraining(sheet, row, retrainStr, R) {
+function processRetraining(sheet, row, retrainStr, R, catalog) {
   var changes = [];
   var swaps = retrainStr.split(',');
 
@@ -648,16 +649,17 @@ function processRetraining(sheet, row, retrainStr, R) {
     var oldSpell = parts[0].trim();
     var newSpell = parts[1].trim();
     if (!oldSpell || !newSpell) continue;
+    var oldKey = spellKey(canonicalSpellName(oldSpell, catalog));
 
     var found = false;
     for (var sc = 0; sc < spellCols.length; sc++) {
       var cellValue = String(sheet.getRange(row, spellCols[sc]).getValue() || '').trim();
       if (!cellValue) continue;
 
-      var spellList = cellValue.split(',').map(function(s) { return s.trim(); });
+      var spellList = splitSpellList(cellValue, catalog);
       var idx = -1;
       for (var j = 0; j < spellList.length; j++) {
-        if (spellList[j].toLowerCase() === oldSpell.toLowerCase()) {
+        if (spellKey(canonicalSpellName(spellList[j], catalog)) === oldKey) {
           idx = j;
           break;
         }
