@@ -48,7 +48,7 @@ var CLASS_BONUS_FEAT_MILESTONES = {
 // MAIN ENTRY POINT
 // ============================================================
 
-function findDiscrepancies() {
+function findDiscrepancies(quiet) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var main = ss.getSheetByName('Database');
   var ref = ss.getSheetByName('Reference tables');
@@ -600,6 +600,7 @@ function findDiscrepancies() {
 
   // --- Write results ---
   writeDiscrepancySheet(ss, issues);
+  if (quiet) return;
 
   // --- Summary alert ---
   var errorCount = issues.filter(function(r) { return r[1] === '❌ ERROR'; }).length;

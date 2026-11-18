@@ -735,10 +735,11 @@ function buildInventorySheet(ss, txnSheet) {
     sheet.getRange(2, NOTES_COL, rows.length - 1, 1 + INVENTORY_CATALOG_COLS.length).setBackground('#FFF9E6');
   }
 
-  // Alternate row colors
+  // Alternate colors in generated columns and leave GM fields yellow.
   for (var r = 2; r <= rows.length; r++) {
-    var bg = (r % 2 === 0) ? '#F3E5F5' : '#FFFFFF';
-    sheet.getRange(r, 1, 1, 7).setBackground(bg);
+    var bg = (r % 2 === 0) ? '#F3E5F5' : '#E3F2FD';
+    sheet.getRange(r, 1, 1, NOTES_COL - 1).setBackground(bg);
+    sheet.getRange(r, rows[0].length).setBackground(bg);
   }
 
   // Column widths

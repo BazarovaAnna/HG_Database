@@ -231,8 +231,8 @@ function revertLevelUp(regSheet, logSheet, logData, timestamp, charName, cols) {
   var regRow = findCharacterRow(regData, charName, R);
   if (regRow === -1) throw new Error('Character not found in Registration');
 
-  // Revert each change
-  for (var i = 0; i < logRows.length; i++) {
+  // Reverse changes in order, including multiple edits to the same cell.
+  for (var i = logRows.length - 1; i >= 0; i--) {
     var entry = logRows[i];
     if (entry.field === '(no changes)') continue;
     if (entry.regCol <= 0) { result.skipped++; continue; }
@@ -314,7 +314,7 @@ function phaseApply(ss, lvlSheet, regSheet, logSheet, cols, spellCatalog) {
 }
 
 
-function applyLevelUp(regSheet, lvlRow, regRow, L, R, spellCatalog) {
+function applyLevelUp(regSheet, lvlRow, regRow, L, R, spellCatalog, readDatabaseRow) {
   var changes = [];
 
   // --- 1. Replace input_lvl ---
@@ -382,7 +382,7 @@ function applyLevelUp(regSheet, lvlRow, regRow, L, R, spellCatalog) {
   var hpRolled = Number(getField(lvlRow, L, 'hpRolled')) || 0;
   if (hpRolled > 0) {
     var charName = String(getField(lvlRow, L, 'charName') || '').trim();
-    var db = getDatabaseRow(charName);
+    var db = (readDatabaseRow || getDatabaseRow)(charName);
     var fcHP = String(getField(lvlRow, L, 'fcBonus') || '').trim().toLowerCase() === 'hp' ? 1 : 0;
 
     var conMod = db ? (Number(db.con_mod) || 0) : 0;

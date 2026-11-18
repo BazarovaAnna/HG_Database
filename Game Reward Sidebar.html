@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { margin: 16px; color: #202124; font: 14px/1.45 Arial, sans-serif; }
+    .context { color: #5f6368; margin: 0 0 14px; }
+    label { display: block; font-weight: 600; margin-top: 10px; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 7px; margin-top: 4px;
+      border: 1px solid #747775; border-radius: 6px; font: inherit; }
+    textarea { min-height: 52px; resize: vertical; }
+    small { display: block; color: #5f6368; }
+    button { margin-top: 12px; padding: 7px 10px; border-radius: 6px; border: 1px solid #747775;
+      background: white; color: #174ea6; font: inherit; cursor: pointer; }
+    #apply { background: #185abc; color: white; border-color: #185abc; }
+    button:disabled { opacity: .55; cursor: default; }
+    #impact { margin: 12px 0; padding: 10px; background: #eef3fb; border-radius: 6px; }
+    ul { padding-left: 18px; overflow-wrap: anywhere; }
+    #message { margin-top: 10px; }
+  </style>
+</head>
+<body data-row="<?= initial.row ?>" data-revision="<?= initial.revision ?>" data-kind="<?= initial.kind || 'game' ?>">
+  <p class="context"><?= initial.context || ('Games · строка ' + initial.row + ' · ' +
+    (initial.processed ? 'есть транзакции' : 'транзакций ещё нет')) ?></p>
+  <form id="game-form">
+    <? initial.fields.forEach(function(field) { ?>
+      <label for="<?= field.key ?>"><?= field.label ?></label>
+      <? if (field.type === 'multiline') { ?>
+        <textarea id="<?= field.key ?>" name="<?= field.key ?>" rows="2"
+          <? if (field.formula) { ?> disabled <? } ?>><?= '\n' + field.value ?></textarea>
+      <? } else { ?>
+        <input id="<?= field.key ?>" name="<?= field.key ?>"
+          type="<?= field.type === 'date' && (!field.value || /^\d{4}-\d{2}-\d{2}$/.test(field.value)) ? 'date' : 'text' ?>"
+          inputmode="<?= field.type === 'number' ? 'decimal' : 'text' ?>"
+          value="<?= field.value ?>" <? if (field.formula) { ?> disabled <? } ?>>
+      <? } ?>
+      <? if (field.locked) { ?>
+        <small><?= field.locked ?></small>
+      <? } else if (field.key === 'characters') { ?>
+        <small>Имена через запятую.</small>
+      <? } else if (field.key === 'goldDelta') { ?>
+        <small>Имя: +15; Другое имя: -10</small>
+      <? } else if (field.key === 'loot') { ?>
+        <small>Имя: Предмет 2, -Другой предмет</small>
+      <? } ?>
+    <? }); ?>
+    <button id="preview" type="submit">Проверить</button>
+    <button id="apply" type="button" disabled>Применить</button>
+  </form>
+  <section id="impact" aria-label="Предпросмотр" hidden></section>
+  <div id="message" role="status"></div>
+  <script>
+    const form = document.getElementById('game-form');
+    const preview = document.getElementById('preview');
+    const apply = document.getElementById('apply');
+    const impact = document.getElementById('impact');
+    const message = document.getElementById('message');
+    const row = Number(document.body.dataset.row);
+    const revision = document.body.dataset.revision;
+    const methods = {
+      game: ['previewGameCorrection', 'applyGameCorrection'],
+      bulletin: ['previewBulletinCorrection', 'applyBulletinCorrection'],
+      inventory: ['previewInventoryCorrection', 'applyInventoryCorrection'],
+      levelup: ['previewLevelUpCorrection', 'applyLevelUpCorrection'],
+      registration: ['previewRegistrationCorrection', 'applyRegistrationCorrection'],
+    };
+    const [previewMethod, applyMethod] = methods[document.body.dataset.kind];
+    const inputs = Array.from(form.querySelectorAll('input:not([disabled]), textarea:not([disabled])'));
+    const original = new Map(inputs.map(input => [input.name, input.value]));
+    const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 });
+    let checked = null;
+
+    function reset() {
+      checked = null;
+      impact.hidden = true;
+      apply.disabled = true;
+      message.textContent = '';
+    }
+
+    function setBusy(busy) {
+      inputs.forEach(input => { input.disabled = busy; });
+      preview.disabled = busy;
+      apply.disabled = busy || !checked;
+    }
+
+    function showError(error) {
+      reset();
+      setBusy(false);
+      message.textContent = error.message;
+    }
+
+    function addList(title, lines) {
+      const label = document.createElement('strong');
+      label.textContent = title;
+      const list = document.createElement('ul');
+      lines.forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        list.appendChild(item);
+      });
+      impact.append(label, list);
+    }
+
+    form.addEventListener('input', reset);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (preview.disabled) return;
+      reset();
+      const changes = Object.fromEntries(inputs.filter(input => input.value !== original.get(input.name))
+        .map(input => [input.name, input.value]));
+      setBusy(true);
+      message.textContent = 'Проверяем…';
+      google.script.run.withFailureHandler(showError).withSuccessHandler(result => {
+        checked = changes;
+        impact.replaceChildren();
+        addList('Изменения в заявке', result.changes.map(change =>
+          change.label + ' · ' + (change.from || 'пусто') + ' → ' + (change.to || 'пусто')));
+        if (result.effects.length) {
+          addList('Что изменится у персонажей', result.effects.map(effect =>
+            effect.name + ' · ' + (effect.delta > 0 ? '+' : '') + number.format(effect.delta) +
+            ' ' + (effect.item === 'gold' ? 'зм' : effect.item)));
+        }
+        if (result.registration?.length) {
+          addList('Изменения в карточке', result.registration.map(change =>
+            change.label + ' · ' + (change.from || 'пусто') + ' → ' + (change.to || 'пусто')));
+        }
+        if (result.pending) {
+          const text = document.createElement('p');
+          text.textContent = 'Золото и предметы обновятся при обработке партии.';
+          impact.appendChild(text);
+        }
+        if (result.namedRewards) {
+          const text = document.createElement('p');
+          text.textContent = 'Проверьте имена в полях «Другие изменения золота» и «Предметы»: в них получатели указаны отдельно.';
+          impact.appendChild(text);
+        }
+        if (result.publication) {
+          const text = document.createElement('p');
+          text.textContent = result.publication;
+          impact.appendChild(text);
+        }
+        if (result.warnings?.length) addList('Предупреждения', result.warnings);
+        impact.hidden = false;
+        message.textContent = '';
+        setBusy(false);
+      })[previewMethod](row, revision, changes);
+    });
+
+    apply.addEventListener('click', () => {
+      if (apply.disabled) return;
+      setBusy(true);
+      message.textContent = 'Сохраняем…';
+      google.script.run.withFailureHandler(showError).withSuccessHandler(result => {
+        message.textContent = result;
+      })[applyMethod](row, revision, checked);
+    });
+  </script>
+</body>
+</html>

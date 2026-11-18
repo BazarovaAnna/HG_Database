@@ -168,7 +168,7 @@ function applyFormValidation() {
 }
 
 
-function syncFormChoices() {
+function syncFormChoices(quiet) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var report = newFormReport();
 
@@ -220,7 +220,8 @@ function syncFormChoices() {
     setChoices(indexFormItems(board), 'board', 'Author', chars, report);
   }
 
-  showFormReport('Form choices synced', report);
+  if (!quiet) showFormReport('Form choices synced', report);
+  return report;
 }
 
 

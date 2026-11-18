@@ -39,6 +39,12 @@ function onOpen() {
     .addSeparator()
     .addItem('Sync form choices', 'syncFormChoices')
     .addItem('Apply form validation', 'applyFormValidation')
+    .addSeparator()
+    .addItem('Correct Registration form entry', 'showRegistrationCorrection')
+    .addItem('Correct Level-Up form entry', 'showLevelUpCorrection')
+    .addItem('Correct Game form entry', 'showGameRewardCorrection')
+    .addItem('Correct Inventory form entry', 'showInventoryCorrection')
+    .addItem('Correct Bulletin Board form entry', 'showBulletinCorrection')
     .addToUi();
 }
 

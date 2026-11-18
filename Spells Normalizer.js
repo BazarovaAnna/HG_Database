@@ -163,10 +163,11 @@ function writeSpellSheet(ss, rows) {
     sheet.getRange(2, 8, rows.length - 1, 1).setBackground('#FFF9E6');
   }
 
-  // Alternate row colors (skip gm_notes column)
+  // Alternate colors on both sides of the editable GM notes.
   for (var r = 2; r <= rows.length; r++) {
-    var bg = (r % 2 === 0) ? '#F3E5F5' : '#FFFFFF';
+    var bg = (r % 2 === 0) ? '#F3E5F5' : '#E3F2FD';
     sheet.getRange(r, 1, 1, 7).setBackground(bg);
+    sheet.getRange(r, 9, 1, rows[0].length - 8).setBackground(bg);
   }
 
   // Column widths
