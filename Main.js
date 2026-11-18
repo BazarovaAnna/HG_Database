@@ -45,6 +45,8 @@ function onOpen() {
     .addItem('Correct Game form entry', 'showGameRewardCorrection')
     .addItem('Correct Inventory form entry', 'showInventoryCorrection')
     .addItem('Correct Bulletin Board form entry', 'showBulletinCorrection')
+    .addSeparator()
+    .addItem('Remove character', 'showCharacterRemoval')
     .addToUi();
 }
 

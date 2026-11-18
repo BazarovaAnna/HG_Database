@@ -291,9 +291,9 @@ function findDiscrepancies(quiet) {
     // ========================================
     if (hpTotal > 0) {
       if (maxHP > 0 && hpTotal > maxHP) {
-        issues.push([charName, '❌ ERROR', 'HP',
-          'HP (' + hpTotal + ') exceeds maximum possible (' + maxHP + ')',
-          '≤ ' + maxHP, hpTotal]);
+        issues.push([charName, '⚠️ WARNING', 'HP',
+          'HP (' + hpTotal + ') exceeds calculated maximum (' + maxHP + ')',
+          'Verify bonus HP', hpTotal]);
       }
       if (minHP > 0 && hpTotal < minHP) {
         issues.push([charName, '❌ ERROR', 'HP',
@@ -354,12 +354,11 @@ function findDiscrepancies(quiet) {
       for (var ci = 0; ci < classes.length; ci++) {
         var clsInfo = classTable[classes[ci].name];
         if (!clsInfo) { saveCheckable = false; break; }
-        var isGood = (clsInfo[sc.refKey] === 'Yes');
-        var progKey = isGood ? 'good' : 'bad';
-        if (!saveProg[progKey] || saveProg[progKey][classes[ci].lvl] === undefined) {
+        var classSave = getClassBaseSave_(saveProg, clsInfo, sc.refKey, classes[ci].lvl);
+        if (classSave === undefined) {
           saveCheckable = false; break;
         }
-        expectedBase += saveProg[progKey][classes[ci].lvl];
+        expectedBase += classSave;
       }
       if (saveCheckable && expectedBase !== actualBase) {
         issues.push([charName, '❌ ERROR', 'Saves',
@@ -368,7 +367,7 @@ function findDiscrepancies(quiet) {
             classes.map(function(c) {
               var ci2 = classTable[c.name];
               var good = ci2 ? (ci2[sc.refKey] === 'Yes' ? 'good' : 'bad') : '?';
-              return c.name + ' ' + c.lvl + ' (' + good + ')';
+              return c.name + ' ' + c.lvl + ' (' + (ci2 && ci2.prestige ? 'prestige ' : '') + good + ')';
             }).join(' + ') + ')',
           'Got ' + actualBase]);
       }
@@ -392,12 +391,11 @@ function findDiscrepancies(quiet) {
       for (var ci = 0; ci < classes.length; ci++) {
         var clsInfo = classTable[classes[ci].name];
         if (!clsInfo) { saveCheckable = false; break; }
-        var isGood = (clsInfo[sc.refKey] === 'Yes');
-        var progKey = isGood ? 'good' : 'bad';
-        if (!saveProg[progKey] || saveProg[progKey][classes[ci].lvl] === undefined) {
+        var classSave = getClassBaseSave_(saveProg, clsInfo, sc.refKey, classes[ci].lvl);
+        if (classSave === undefined) {
           saveCheckable = false; break;
         }
-        expectedBase += saveProg[progKey][classes[ci].lvl];
+        expectedBase += classSave;
       }
       if (!saveCheckable) continue;
       var misc = (sc.miscName in col) ? vNum(row, sc.miscName) : 0;
@@ -590,6 +588,7 @@ function findDiscrepancies(quiet) {
   // CHECK 17: Inventory from Transactions
   // ========================================
   var knownChars = {};
+  archivedCharacterNames_(ss).forEach(function(name) { knownChars[name] = true; });
   for (var i = 4; i < data.length; i++) {
     var name = String(v(data[i], 'char')).trim();
     if (name) knownChars[name.toLowerCase()] = true;
@@ -826,6 +825,12 @@ function formatSpellLevels(levels) {
 // REFERENCE TABLE LOADER (classes + BAB/save progressions + deities)
 // ============================================================
 
+function getClassBaseSave_(saveProg, classInfo, saveKey, level) {
+  var rate = classInfo[saveKey] === 'Yes' ? 'good' : 'bad';
+  var progression = saveProg[classInfo.prestige ? 'prestige ' + rate : rate];
+  return progression ? progression[level] : undefined;
+}
+
 function loadRefData(refSheet) {
   var data = refSheet.getDataRange().getValues();
   var classTable = {};
@@ -850,6 +855,7 @@ function loadRefData(refSheet) {
         if (h === 'Skills/Lvl' || h === 'Skills')   colMap.skillsPerLvl = c;
         if (h === 'Hit Die')                        colMap.hitDie = c;
         if (h === 'Caster?' || h === 'Caster')      colMap.caster = c;
+        if (h === 'Prestige?')                      colMap.prestige = c;
       }
       for (var j = i + 1; j < data.length; j++) {
         var className = String(data[j][colMap.name]).trim();
@@ -862,6 +868,7 @@ function loadRefData(refSheet) {
           skillsPerLvl: Number(data[j][colMap.skillsPerLvl]) || 0,
           hitDie:       Number(data[j][colMap.hitDie]) || 0,
           caster: String(data[j][colMap.caster] || '').trim(),
+          prestige: String(data[j][colMap.prestige] || '').trim() === 'Yes',
         };
       }
     }
@@ -879,6 +886,8 @@ function loadRefData(refSheet) {
         if (h === '1/2 BAB'  || h === '1/2')            progCols.halfBAB = c;
         if (h === 'Good Save' || h === 'Good')          progCols.goodSave = c;
         if (h === 'Bad Save'  || h === 'Bad')           progCols.badSave = c;
+        if (h === 'Prestige Good Save')                progCols.prestigeGoodSave = c;
+        if (h === 'Prestige Bad Save')                 progCols.prestigeBadSave = c;
       }
 
       if ('level' in progCols) {
@@ -905,6 +914,14 @@ function loadRefData(refSheet) {
           if ('badSave' in progCols) {
             if (!saveProgression['bad']) saveProgression['bad'] = {};
             saveProgression['bad'][lvl] = Number(data[j][progCols.badSave]) || 0;
+          }
+          if ('prestigeGoodSave' in progCols && typeof data[j][progCols.prestigeGoodSave] === 'number') {
+            if (!saveProgression['prestige good']) saveProgression['prestige good'] = {};
+            saveProgression['prestige good'][lvl] = data[j][progCols.prestigeGoodSave];
+          }
+          if ('prestigeBadSave' in progCols && typeof data[j][progCols.prestigeBadSave] === 'number') {
+            if (!saveProgression['prestige bad']) saveProgression['prestige bad'] = {};
+            saveProgression['prestige bad'][lvl] = data[j][progCols.prestigeBadSave];
           }
         }
       }

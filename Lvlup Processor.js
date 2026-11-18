@@ -298,6 +298,10 @@ function phaseApply(ss, lvlSheet, regSheet, logSheet, cols, spellCatalog) {
       report.errors.push(charName + ': not found in Registration');
       continue;
     }
+    if (getField(regData[regRow - 1], R, 'approved') === CHARACTER_ARCHIVED_STATUS) {
+      report.skipped++;
+      continue;
+    }
 
     try {
       var changes = applyLevelUp(regSheet, row, regRow, L, R, spellCatalog);

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { margin: 16px; color: #202124; font: 14px/1.45 Arial, sans-serif; }
+    h1 { margin: 0 0 2px; font-size: 19px; overflow-wrap: anywhere; }
+    p { margin: 8px 0; }
+    .context { color: #5f6368; margin-bottom: 16px; }
+    button { margin: 0 4px 8px 0; padding: 7px 9px; border: 1px solid #747775;
+      border-radius: 6px; background: white; color: #174ea6; font: inherit; cursor: pointer; }
+    button[aria-pressed=true] { background: #e8f0fe; border-color: #185abc; }
+    #apply[data-mode=delete] { background: #a50e0e; border-color: #a50e0e; color: white; }
+    #apply[data-mode=archive] { background: #185abc; border-color: #185abc; color: white; }
+    button:disabled { opacity: .55; cursor: default; }
+    ul { padding-left: 18px; overflow-wrap: anywhere; }
+    input { box-sizing: border-box; width: 100%; margin: 6px 0 12px; padding: 8px; font: inherit; }
+    #message { margin-top: 10px; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body data-row="<?= initial.row ?>" data-name="<?= initial.name ?>">
+  <h1><?= initial.name ?></h1>
+  <p class="context">Registration · строка <?= initial.row ?><?= initial.archived ? ' · в архиве' : '' ?></p>
+  <div role="group" aria-label="Действие">
+    <button id="archive" type="button" aria-pressed="false" <? if (initial.archived) { ?>disabled<? } ?>>Архивировать</button>
+    <button id="delete" type="button" aria-pressed="false">Удалить окончательно</button>
+  </div>
+  <section id="preview" aria-label="Последствия" hidden>
+    <ul id="summary"></ul>
+    <div id="confirm-delete" hidden>
+      <label for="confirmation">Введи короткое имя персонажа для подтверждения</label>
+      <input id="confirmation" autocomplete="off">
+    </div>
+    <button id="apply" type="button" disabled>Применить</button>
+  </section>
+  <div id="message" role="status"></div>
+  <script>
+    const row = Number(document.body.dataset.row);
+    const name = document.body.dataset.name;
+    const archive = document.getElementById('archive');
+    const remove = document.getElementById('delete');
+    const preview = document.getElementById('preview');
+    const summary = document.getElementById('summary');
+    const apply = document.getElementById('apply');
+    const message = document.getElementById('message');
+    const confirmDelete = document.getElementById('confirm-delete');
+    const confirmation = document.getElementById('confirmation');
+    const archived = archive.disabled;
+    let choice;
+    let revision;
+
+    function disableChoices(busy) {
+      archive.disabled = busy || archived;
+      remove.disabled = busy;
+    }
+
+    function showError(error) {
+      revision = undefined;
+      disableChoices(false);
+      apply.disabled = true;
+      confirmation.disabled = false;
+      message.textContent = error.message;
+    }
+
+    function check(mode) {
+      choice = mode;
+      disableChoices(true);
+      preview.hidden = true;
+      archive.setAttribute('aria-pressed', String(mode === 'archive'));
+      remove.setAttribute('aria-pressed', String(mode === 'delete'));
+      message.textContent = 'Проверяем связанные записи…';
+      google.script.run.withFailureHandler(showError).withSuccessHandler(result => {
+        revision = result.revision;
+        summary.replaceChildren();
+        result.summary.forEach(text => {
+          const item = document.createElement('li');
+          item.textContent = text;
+          summary.appendChild(item);
+        });
+        confirmDelete.hidden = mode !== 'delete';
+        confirmation.value = '';
+        apply.textContent = mode === 'delete' ? 'Удалить окончательно' : 'Архивировать';
+        apply.dataset.mode = mode;
+        apply.disabled = mode === 'delete';
+        preview.hidden = false;
+        disableChoices(false);
+        message.textContent = '';
+      }).previewCharacterRemoval(row, mode, name);
+    }
+
+    archive.addEventListener('click', () => check('archive'));
+    remove.addEventListener('click', () => check('delete'));
+    confirmation.addEventListener('input', () => {
+      apply.disabled = !revision || confirmation.value !== name;
+    });
+    apply.addEventListener('click', () => {
+      if (!revision || apply.disabled) return;
+      disableChoices(true);
+      apply.disabled = true;
+      confirmation.disabled = true;
+      message.textContent = 'Сохраняем…';
+      google.script.run.withFailureHandler(showError).withSuccessHandler(result => {
+        preview.hidden = true;
+        message.textContent = result;
+      }).applyCharacterRemoval(row, choice, revision, confirmation.value);
+    });
+  </script>
+</body>
+</html>

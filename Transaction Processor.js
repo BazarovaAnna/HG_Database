@@ -103,7 +103,7 @@ function processGameSessions() {
     var timestamp = String(getField(row, G, 'timestamp'));
     var characters = String(getField(row, G, 'characters') || '').trim();
 
-    if (!characters) continue;
+    if (!characters || characters === NO_ACTIVE_CHARACTER_CHOICE) continue;
 
     // Games has no Approve column — process all non-empty rows
     var processKey = timestamp + '|game';
@@ -146,7 +146,8 @@ function initializeStartingGold() {
     if (key) col[key] = c;
   }
 
-  var inventory = buildInventoryMap(txnSheet);
+  var catalog = loadItemCatalog(ss);
+  var inventory = buildInventoryMap(txnSheet, catalog);
 
   var created = 0;
   var skipped = 0;
@@ -198,6 +199,7 @@ function processInventory() {
   var catalog = loadItemCatalog(ss);
   var inventory = buildInventoryMap(txnSheet, catalog);
   var characters = loadCharacterNames(ss);
+  var archived = new Set(archivedCharacterNames_(ss, cols.registration));
 
   var processed = 0;
   var skipped = 0;
@@ -213,6 +215,7 @@ function processInventory() {
 
     if (!isApproved(approved)) continue;
     if (!charName) continue;
+    if (archived.has(charName.toLowerCase()) || charName === NO_ACTIVE_CHARACTER_CHOICE) continue;
 
     var processKey = timestamp + '|inventory|' + charName.toLowerCase();
     if (processedSet[processKey] || processedSet[timestamp + '|request']) { skipped++; continue; }

@@ -177,6 +177,8 @@ function syncFormChoices(quiet) {
   var races   = readRefColumn(ref, 'Race');
   var deities = readRefColumn(ref, 'Deity');
   var chars   = readCharacterNames(ss);
+  if (chars && !chars.length) chars = [NO_ACTIVE_CHARACTER_CHOICE];
+  chars = chars || [];
   var masters = readMasters(ss, report);
 
   var favClassRx = '^\\s*(?:' + classes.map(escapeRegex).join('|') + ')' +
@@ -373,7 +375,8 @@ function readMasters(ss, report) {
 
 function readCharacterNames(ss) {
   var data = ss.getSheetByName('Database').getDataRange().getValues();
-  var col = data[3].map(function(h) { return String(h).trim(); }).indexOf('char');
+  var col = (data[3] || []).map(function(h) { return String(h).trim(); }).indexOf('char');
+  if (col === -1) return null;
   var names = [];
   for (var r = 4; r < data.length; r++) {
     var v = String(data[r][col]).trim();
