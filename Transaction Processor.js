@@ -369,6 +369,7 @@ function loadItemCatalog(ss) {
     weight: hdr.indexOf('weight'), link: hdr.indexOf('link'),
   };
   if (c.name === -1) return catalog;
+  var masterworkSurcharges = loadMasterworkSurcharges(ss.getSheetByName('Reference tables'));
 
   for (var r = 1; r < data.length; r++) {
     var names = splitCatalogNames(data[r][c.name]);
@@ -379,17 +380,46 @@ function loadItemCatalog(ss) {
       name: names[0], aliases: names.slice(1).join('|'),
       category: cell('category'), description: cell('description'),
       cost: cell('cost'), weight: cell('weight'), link: String(cell('link') || '').trim(),
+      masterworkSurcharge: masterworkSurcharges[itemKey(cell('category'))] ?? '',
     };
     indexCatalogNames(catalog, names, entry, itemKey, 'Items catalog', r + 1);
   }
   return catalog;
 }
 
+// Reference tables, like the other lookup tables, can sit beside other
+// data. This block starts with its title above the category column.
+function loadMasterworkSurcharges(sheet) {
+  var surcharges = Object.create(null);
+  if (!sheet) return surcharges;
+
+  var rows = sheet.getDataRange().getValues();
+  for (var r = 0; r + 1 < rows.length; r++) {
+    var col = rows[r].findIndex(function(value) {
+      return itemKey(value) === 'masterwork surcharge';
+    });
+    if (col === -1) continue;
+    if (itemKey(rows[r + 1][col]) !== 'category' ||
+        itemKey(rows[r + 1][col + 1]) !== 'surcharge (gp)') continue;
+
+    for (var i = r + 2; i < rows.length; i++) {
+      var category = itemKey(rows[i][col]);
+      if (!category) break;
+      var raw = rows[i][col + 1];
+      if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+        surcharges[category] = raw;
+      }
+    }
+    break;
+  }
+  return surcharges;
+}
+
 // Fills what the form did not state: cost when fewer than 2 numbers
 // were given, weight when fewer than 3. Stated values always win.
 function applyCatalog(parsed, catalog) {
   if (!parsed || !catalog) return parsed;
-  var ref = catalog[itemKey(parsed.name)];
+  var ref = resolveCatalogItem(parsed.name, catalog);
   if (!ref) return parsed;
   parsed.name = ref.name;
   if (parsed.given < 2 && Number(ref.cost) > 0) parsed.cost = Number(ref.cost);
