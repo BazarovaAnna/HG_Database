@@ -677,7 +677,7 @@ function buildInventorySheet(ss, txnSheet) {
 
     var key = order[i];
     var manual = kept[key] || {};
-    var ref = catalog[itemKey(item.itemName)] || {};
+    var ref = resolveCatalogItem(item.itemName, catalog) || {};
 
     // Catalog-backed columns: the manual value, else the catalog one.
     // Hidden marker columns record what was filled from the catalog

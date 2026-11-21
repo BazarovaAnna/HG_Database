@@ -74,7 +74,7 @@ function applyWorld(text, charName, inv, catalog, note, add, out) {
     }
 
     if (e.sign > 0) {
-      var ref = catalog[itemKey(e.name)];
+      var ref = resolveCatalogItem(e.name, catalog);
       var name = ref ? ref.name : e.name;
       var value = e.price !== null ? e.price : (ref && ref.cost !== '' ? Number(ref.cost) : null);
       var weight = e.weight !== null ? e.weight : (ref ? ref.weight : '');
@@ -112,7 +112,7 @@ function applyWorld(text, charName, inv, catalog, note, add, out) {
     if (e.price !== null) {
       price = e.price; how = 'stated price';
     } else if (e.sell) {
-      var ref2 = catalog[itemKey(have.name)];
+      var ref2 = resolveCatalogItem(have.name, catalog);
       if (ref2 && Number(ref2.cost) > 0) { price = Number(ref2.cost) / 2; how = 'half catalog price'; }
       else if (Number(have.cost) > 0) { price = Number(have.cost) / 2; how = 'half its value'; }
       else out.warnings.push('"' + have.name + '" sold for 0: no price stated, none in catalog or inventory');
@@ -147,7 +147,7 @@ function parseWorldEntry(raw, catalog) {
   // One "(…)" group of price / weight / sell / free at the end. A name
   // that itself ends in parentheses wins if it is in the catalog:
   // "Arrows (20)" is the item, "Arrows (20) (1)" costs 1.
-  if (!catalog[itemKey(rest)]) {
+  if (!resolveCatalogItem(rest, catalog)) {
     var p = rest.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
     var parsed = p ? parseDetails(p[2]) : null;
     if (parsed) {
