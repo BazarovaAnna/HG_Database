@@ -85,7 +85,7 @@ function applyWorld(text, charName, inv, catalog, note, add, out) {
         continue;
       }
       if (value === null) {
-        out.warnings.push('"' + name + '" bought for 0: no price stated and not in catalog');
+        out.warnings.push('"' + name + '" bought for 0: no price stated or available in catalog');
         value = 0;
       }
       add({ source: 'inventory', character: charName, itemName: name,

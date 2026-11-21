@@ -215,8 +215,8 @@ function processInventory() {
 
     if (!isApproved(approved)) continue;
     if (!charName) continue;
-    if (archived.has(charName.toLowerCase()) || charName === NO_ACTIVE_CHARACTER_CHOICE) continue;
 
+    if (archived.has(charName.toLowerCase()) || charName === NO_ACTIVE_CHARACTER_CHOICE) continue;
     var processKey = timestamp + '|inventory|' + charName.toLowerCase();
     if (processedSet[processKey] || processedSet[timestamp + '|request']) { skipped++; continue; }
 
